@@ -59,8 +59,31 @@ else echo "Video not found: $INPUT" >&2; exit 2; fi
 SEQ_NAME="$(basename "$VIDEO")"; SEQ_NAME="${SEQ_NAME%.*}"
 NAME="${2:-$SEQ_NAME}"
 
-echo "=== Namma-IITB full RGB-only pipeline ==="
-echo "video=$VIDEO name=$NAME subsample=${SUBSAMPLE:-2} fov=${FOV_X:-60} max_points=${MAX_POINTS:-300000} gs_iters=${GS_ITERS:-7000}"
+HQ_ENABLED="${HQ:-0}"
+TRAIN_NAME="$NAME"
+
+if [[ "$HQ_ENABLED" == "1" || "$HQ_ENABLED" == "true" || "$HQ_ENABLED" == "TRUE" ]]; then
+  [[ -n "${CAMERA_PROFILE:-}" ]] || {
+    echo "ERROR: HQ=1 requires CAMERA_PROFILE=<profile-name>." >&2
+    echo "Example: CAMERA_PROFILE=advio15 HQ=1 ./run.sh pipeline frames.mov library" >&2
+    exit 2
+  }
+
+  TRAIN_NAME="${HQ_RUN:-${NAME}_hq}"
+  [[ "$TRAIN_NAME" != "$NAME" ]] || {
+    echo "ERROR: HQ_RUN must differ from the base run name '$NAME'." >&2
+    exit 2
+  }
+fi
+
+echo "=== Namma full RGB-only pipeline ==="
+echo "video=$VIDEO name=$NAME subsample=${SUBSAMPLE:-2} max_points=${MAX_POINTS:-300000} gs_iters=${GS_ITERS:-7000}"
+if [[ -n "${CAMERA_PROFILE:-}" ]]; then
+  echo "camera_profile=$CAMERA_PROFILE"
+else
+  echo "camera_profile=<none> (conversion fallback FOV_X=${FOV_X:-60})"
+fi
+echo "hq=$HQ_ENABLED"
 
 stage_start "MASt3R-SLAM"
 /opt/namma/scripts/run_slam.sh "$VIDEO" "$NAME"
@@ -70,17 +93,24 @@ stage_start "MASt3R -> 3DGS conversion"
 /opt/namma/scripts/convert.sh "$NAME" "$SEQ_NAME"
 stage_done
 
+if [[ "$HQ_ENABLED" == "1" || "$HQ_ENABLED" == "true" || "$HQ_ENABLED" == "TRUE" ]]; then
+  stage_start "Original-resolution undistorted GS dataset"
+  rm -rf "/workspace/outputs/gs_dataset/$TRAIN_NAME"
+  /opt/namma/scripts/make_hq_dataset.sh "$NAME" "$VIDEO" "$TRAIN_NAME" "$SEQ_NAME"
+  stage_done
+fi
+
 stage_start "3DGS training"
-/opt/namma/scripts/train_3dgs.sh "$NAME"
+/opt/namma/scripts/train_3dgs.sh "$TRAIN_NAME"
 stage_done
 
 stage_start "3DGS rendering"
-/opt/namma/scripts/render_3dgs.sh "$NAME"
+/opt/namma/scripts/render_3dgs.sh "$TRAIN_NAME"
 stage_done
 
 PIPELINE_END_EPOCH="$(date +%s)"
 PIPELINE_TOTAL_SECONDS=$(( PIPELINE_END_EPOCH - PIPELINE_START_EPOCH ))
 
 echo "=== COMPLETE ==="
-echo "Final PLY: /workspace/outputs/gs_model/$NAME/point_cloud/iteration_${GS_ITERS:-7000}/point_cloud.ply"
+echo "Final PLY: /workspace/outputs/gs_model/$TRAIN_NAME/point_cloud/iteration_${GS_ITERS:-7000}/point_cloud.ply"
 echo "Total pipeline time: $(format_duration "$PIPELINE_TOTAL_SECONDS")"

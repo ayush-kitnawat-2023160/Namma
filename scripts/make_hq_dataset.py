@@ -39,6 +39,23 @@ def get_colmap_image_names(images_txt, image_dir):
     return [name for _, name in records]
 
 
+def discover_sequence_name(mast3r_run: Path, explicit: str | None) -> str:
+    if explicit:
+        trajectory = mast3r_run / f"{explicit}.txt"
+        if not trajectory.is_file():
+            raise RuntimeError(f"Missing trajectory: {trajectory}")
+        return explicit
+
+    trajectories = sorted(mast3r_run.glob("*.txt"))
+    if len(trajectories) != 1:
+        names = ", ".join(p.name for p in trajectories) or "<none>"
+        raise RuntimeError(
+            "Could not determine MASt3R sequence name automatically. "
+            f"Found: {names}. Pass --sequence explicitly."
+        )
+    return trajectories[0].stem
+
+
 def main():
     ap = argparse.ArgumentParser()
 
@@ -46,17 +63,15 @@ def main():
     ap.add_argument("--out-run", required=True)
     ap.add_argument("--video", required=True)
     ap.add_argument("--camera", required=True)
+    ap.add_argument("--sequence", default=None)
 
     args = ap.parse_args()
 
     src = Path("/workspace/outputs/gs_dataset") / args.run
     dst = Path("/workspace/outputs/gs_dataset") / args.out_run
-
-    traj_path = (
-        Path("/workspace/outputs/mast3r")
-        / args.run
-        / "frames.txt"
-    )
+    mast3r_run = Path("/workspace/outputs/mast3r") / args.run
+    sequence = discover_sequence_name(mast3r_run, args.sequence)
+    traj_path = mast3r_run / f"{sequence}.txt"
 
     if not src.exists():
         raise RuntimeError(f"Missing source dataset: {src}")
@@ -70,6 +85,7 @@ def main():
         )
 
     print(f"Copying:\n  {src}\n-> {dst}")
+    print(f"Sequence: {sequence}")
     shutil.copytree(src, dst)
 
     # --------------------------------------------------------

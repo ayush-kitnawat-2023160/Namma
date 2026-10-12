@@ -19,7 +19,7 @@ def ok(message: str) -> None:
     print(f"[ OK ] {message}")
 
 
-print("=== Namma-IITB GPU preflight ===")
+print("=== Namma GPU preflight ===")
 print(f"Python: {sys.version.split()[0]}")
 print(f"PyTorch: {torch.__version__}")
 print(f"Torch CUDA build: {torch.version.cuda}")
@@ -79,4 +79,3 @@ if free / 1024**3 < 16:
     print("[WARN] Less than 16 GiB is currently free. Another process may be occupying the GPU.")
 
 print("=== Preflight passed ===")
-

@@ -18,7 +18,7 @@ def run(cmd: list[str], cwd: str | None = None) -> None:
     subprocess.run(cmd, cwd=cwd, check=True)
 
 
-print("=== Namma-IITB CPU-safe smoke test ===")
+print("=== Namma CPU-safe smoke test ===")
 for p in [
     Path("/opt/MASt3R-SLAM/main.py"),
     Path("/opt/SplatSLAM/scripts/export_mast3r_to_3dgs.py"),
@@ -120,4 +120,3 @@ with tempfile.TemporaryDirectory(prefix="namma-smoke-") as td:
     print("[ OK ] points3D PLY generation")
 
 print("=== Smoke test passed ===")
-

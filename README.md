@@ -1,4 +1,4 @@
-# Namma-IITB — RGB Video → MASt3R-SLAM → 3D Gaussian Splatting
+# Namma — RGB Video → MASt3R-SLAM → 3D Gaussian Splatting
 
 Portable, headless Docker project for the Namma Space Round-1 reconstruction experiment.
 
@@ -17,17 +17,23 @@ Python, Conda, CUDA Toolkit, MASt3R-SLAM, the checkpoints, SplatSLAM, Open3D and
 ```text
 single RGB video
   ↓
-MASt3R-SLAM (no calibration, no depth, headless)
+MASt3R-SLAM (headless)
   ├─ tracking / keyframes
   ├─ retrieval + loop closure
-  ├─ global Sim(3) optimization
+  ├─ global optimization
   └─ trajectory + dense colored PLY
   ↓
 SplatSLAM bridge
   ├─ pose-convention conversion
-  ├─ approximate pinhole intrinsics from FOV_X
+  ├─ calibrated intrinsics when CAMERA_PROFILE is provided
+  ├─ FOV fallback when no calibration is available
   ├─ point downsampling
   └─ SOR outlier cleanup
+  ↓
+optional HQ dataset stage
+  ├─ recover original-resolution frames using corrected timestamps
+  ├─ lens undistortion from the camera profile
+  └─ update the COLMAP pinhole camera after rectification
   ↓
 Graphdeco 3DGS
   ↓
@@ -39,7 +45,7 @@ The MASt3R-SLAM viewer path is deliberately disabled/lazy-imported. This avoids 
 ## Project layout
 
 ```text
-Namma-IITB/
+Namma/
 ├── Dockerfile
 ├── build.sh
 ├── run.sh
@@ -59,11 +65,23 @@ All runtime paths are relative to the project root, so the folder can be copied 
 ## First-time build
 
 ```bash
-cd /wherever/Namma-IITB
+cd /wherever/Namma
 ./build.sh
 ```
 
 This is a large build because it contains CUDA, PyTorch, checkpoints and compiled CUDA extensions.
+
+`run.sh` mounts the local `scripts/` and `config/` directories read-only into the
+container. After the first successful image build, ordinary script/config edits do
+not require rebuilding the large Docker image; rebuild only when the Dockerfile or
+container dependencies change.
+
+Docker jobs run as root inside the container, so generated files can occasionally
+become root-owned on the host. Repair ownership at any time with:
+
+```bash
+./run.sh fix-perms
+```
 
 ## CPU-safe pseudo/smoke test
 
@@ -124,9 +142,17 @@ Inspect the point cloud/trajectory before spending time training 3DGS.
 ./run.sh convert library
 ```
 
-Defaults:
+No camera profile is assumed automatically. For a known camera, pass a profile:
 
-- `FOV_X=60` degrees (because the input is intentionally uncalibrated)
+```bash
+CAMERA_PROFILE=advio15 MAX_POINTS=500000 ./run.sh convert library
+```
+
+The converter scales the stored calibration to the MASt3R keyframe resolution. If
+`CAMERA_PROFILE` is omitted, it falls back to `FOV_X=60` unless overridden.
+
+Other defaults:
+
 - `MAX_POINTS=300000`
 - SOR: 20 neighbors, std ratio 1.25
 
@@ -134,6 +160,29 @@ You can override them from the host shell and `run.sh` forwards them into the co
 
 ```bash
 FOV_X=65 MAX_POINTS=250000 ./run.sh convert library
+```
+
+## Original-resolution undistorted GS dataset
+
+For a calibrated camera, rebuild the converted dataset using original-resolution
+video frames and the profile's distortion coefficients:
+
+```bash
+CAMERA_PROFILE=advio15 \
+./run.sh hq library frames.mov library_hq
+```
+
+This keeps the MASt3R poses/geometry, extracts the original video frame for every
+keyframe timestamp, undistorts it, and writes the corresponding rectified PINHOLE
+camera to the new dataset. Sequence names are discovered automatically when there
+is only one MASt3R trajectory; an explicit sequence can be supplied as the fourth
+argument when necessary.
+
+Train/render the HQ dataset normally:
+
+```bash
+GS_ITERS=10000 ./run.sh train library_hq
+GS_ITERS=10000 ./run.sh render library_hq
 ```
 
 ## Train 3DGS
@@ -180,6 +229,15 @@ SUBSAMPLE=3 MAX_POINTS=300000 GS_ITERS=7000 \
 ./run.sh pipeline corridor.mp4 corridor
 ```
 
+To include the original-resolution undistortion stage in the one-command pipeline:
+
+```bash
+CAMERA_PROFILE=advio15 HQ=1 MAX_POINTS=500000 GS_ITERS=10000 \
+./run.sh pipeline frames.mov library
+```
+
+The HQ dataset/model defaults to `<name>_hq`; override it with `HQ_RUN=<name>`.
+
 ## 24 GB VRAM safety choices
 
 - MASt3R stays at its native ~512 network-input regime.
@@ -193,9 +251,17 @@ SUBSAMPLE=3 MAX_POINTS=300000 GS_ITERS=7000 \
 
 If memory is still tight, first use `SUBSAMPLE=3` or `4` and `MAX_POINTS=200000`.
 
-## Camera-calibration caveat
+## Camera calibration
 
-MASt3R-SLAM can run uncalibrated, which is exactly how this project uses it. Standard Graphdeco 3DGS still expects a pinhole camera, so the SplatSLAM bridge approximates `fx/fy` from `FOV_X` and uses the image center for `cx/cy`. This is the main approximation in the RGB-only pipeline. If real camera intrinsics become available later, use them instead.
+Camera profiles live under `config/cameras/` and contain reference resolution,
+`fx/fy/cx/cy`, and optional distortion coefficients. The project deliberately does
+**not** default to any specific profile: this prevents a random phone video from
+silently receiving ADVIO intrinsics.
+
+When a profile is supplied, `convert` scales its intrinsics to the MASt3R keyframe
+resolution. The `hq` stage additionally applies lens undistortion at the original
+video resolution. If no calibration is available, `convert` can still use the
+`FOV_X` fallback for experimentation.
 
 ## SSH/tmux workflow
 
@@ -203,7 +269,7 @@ On the GPU PC:
 
 ```bash
 tmux new -s namma
-cd /wherever/Namma-IITB
+cd /wherever/Namma
 ./run.sh pipeline library.mp4
 ```
 
@@ -212,7 +278,7 @@ Detach: `Ctrl-b`, then `d`. Reattach with `tmux attach -t namma`.
 Then download outputs from your laptop with `rsync`, for example:
 
 ```bash
-rsync -ahP user@gpu-host:/path/to/Namma-IITB/outputs/gs_model/library/ ./library_model/
+rsync -ahP user@gpu-host:/path/to/Namma/outputs/gs_model/library/ ./library_model/
 ```
 
 ## Third-party code
