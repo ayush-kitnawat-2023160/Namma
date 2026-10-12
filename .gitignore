@@ -6,4 +6,5 @@ outputs/**
 __pycache__/
 *.pyc
 .DS_Store
-
+nextgen/checkpoints/*
+!nextgen/checkpoints/.gitkeep

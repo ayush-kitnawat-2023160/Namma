@@ -1,0 +1,31 @@
+calibration:
+  views: 20
+  camera_model: radial
+
+prepare:
+  target_views: 120
+  max_candidates: 1200
+  min_blur: 20.0
+  max_clip_fraction: 0.45
+  duplicate_distance: 0.025
+
+vggt:
+  image_resolution: 512
+  resize_mode: max_size
+  confidence_percentile: 20.0
+  max_pointcloud_points: 1000000
+
+sfm:
+  temporal_window: 5
+  visual_neighbors: 5
+  feature_config: superpoint_max
+  matcher_config: superpoint+lightglue
+  fix_known_intrinsics: true
+
+gaussian_splatting:
+  iterations: 15000
+  resolution: 1
+  depth_l1_weight_init: 1.0
+  depth_l1_weight_final: 0.01
+  antialiasing: true
+  exposure_compensation: true
