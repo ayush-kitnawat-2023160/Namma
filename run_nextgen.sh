@@ -38,7 +38,8 @@ do
 done
 
 case "$CMD" in
-  help|-h|--help|check|inspect|fix-perms|shell|bash) GPU_ARGS=() ;;
+  help|-h|--help|inspect|fix-perms|shell|bash) GPU_ARGS=() ;;
+  check) GPU_ARGS=(--gpus all) ;;
   prepare)
     if [[ -n "${NG_CAMERA_PROFILE:-}" ]]; then GPU_ARGS=(); else GPU_ARGS=(--gpus all); fi
     ;;

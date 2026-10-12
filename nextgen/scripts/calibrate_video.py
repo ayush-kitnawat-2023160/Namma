@@ -21,10 +21,19 @@ def sharpness(frame: np.ndarray) -> float:
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
-def select_calibration_frames(video: Path, views: int) -> tuple[list[np.ndarray], list[int], float, int, int]:
+def open_video(video: Path) -> cv2.VideoCapture:
+    """Decode the coded/sensor orientation, ignoring display rotation metadata."""
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video}")
+    orientation_auto = getattr(cv2, "CAP_PROP_ORIENTATION_AUTO", None)
+    if orientation_auto is not None:
+        cap.set(orientation_auto, 0)
+    return cap
+
+
+def select_calibration_frames(video: Path, views: int) -> tuple[list[np.ndarray], list[int], float, int, int]:
+    cap = open_video(video)
     fps = float(cap.get(cv2.CAP_PROP_FPS))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))

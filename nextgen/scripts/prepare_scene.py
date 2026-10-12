@@ -25,6 +25,25 @@ class Candidate:
     descriptor: np.ndarray
 
 
+def open_video(video: Path) -> cv2.VideoCapture:
+    """Open the coded video stream without applying display-rotation metadata.
+
+    ADVIO calibration is defined in the sensor/coded-frame orientation
+    (720x1280). OpenCV/FFmpeg may otherwise auto-rotate the stream to 1280x720
+    using container metadata, which makes the calibration appear incompatible.
+    Keeping the coded orientation also avoids having to rotate tangential
+    distortion coefficients.
+    """
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video}")
+
+    orientation_auto = getattr(cv2, "CAP_PROP_ORIENTATION_AUTO", None)
+    if orientation_auto is not None:
+        cap.set(orientation_auto, 0)
+    return cap
+
+
 def load_profile(path: Path, width: int, height: int):
     with path.open() as handle:
         profile = yaml.safe_load(handle)
@@ -132,9 +151,7 @@ def extract_selected(
     map2: np.ndarray | None,
 ) -> list[dict]:
     wanted = {c.frame_index: (i, c) for i, c in enumerate(selected)}
-    cap = cv2.VideoCapture(str(video))
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot reopen video: {video}")
+    cap = open_video(video)
 
     records: list[dict] = []
     frame_idx = 0
@@ -190,9 +207,7 @@ def main() -> None:
     image_dir = args.output / "images"
     image_dir.mkdir(parents=True)
 
-    cap = cv2.VideoCapture(str(args.video))
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {args.video}")
+    cap = open_video(args.video)
     fps = float(cap.get(cv2.CAP_PROP_FPS))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -221,7 +236,7 @@ def main() -> None:
         }
 
     stride = max(1, math.ceil(max(total_frames, 1) / max(args.max_candidates, 1)))
-    print(f"Video: {width}x{height} @ {fps:.3f} FPS, {total_frames} frames")
+    print(f"Video (coded orientation): {width}x{height} @ {fps:.3f} FPS, {total_frames} frames")
     print(f"Candidate stride: {stride} (target <= {args.max_candidates})")
     print(f"Target selected views: {args.target_views}")
     print("Calibration:", "known + rectified" if args.camera_profile else "unknown (no undistortion)")
