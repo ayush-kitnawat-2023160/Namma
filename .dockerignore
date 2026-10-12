@@ -1,0 +1,17 @@
+.git
+.git/**
+data/**
+!data/.gitkeep
+outputs/**
+!outputs/**/.gitkeep
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.ply
+*.pth
+*.pt
+*.ckpt
+__pycache__/
+*.pyc
+

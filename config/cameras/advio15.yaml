@@ -1,0 +1,16 @@
+name: advio15
+
+width: 720
+height: 1280
+
+fx: 1082.4
+fy: 1084.4
+cx: 364.68
+cy: 643.31
+
+distortion_model: radtan
+distortion:
+  - 0.0366
+  - 0.0803
+  - 0.0007
+  - -0.0002

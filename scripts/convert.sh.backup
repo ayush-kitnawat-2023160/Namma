@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+[[ $# -ge 1 ]] || { echo "Usage: convert <name> [sequence-name]" >&2; exit 2; }
+RUN_NAME="$1"
+SOURCE="/workspace/outputs/mast3r/$RUN_NAME"
+[[ -d "$SOURCE" ]] || { echo "Missing $SOURCE" >&2; exit 2; }
+
+if [[ $# -ge 2 ]]; then
+  SEQ_NAME="$2"
+else
+  mapfile -t seqs < <(find "$SOURCE" -maxdepth 1 -type f -name '*.txt' -printf '%f\n' | sed 's/\.txt$//' | sort)
+  [[ ${#seqs[@]} -eq 1 ]] || { echo "Cannot infer unique sequence; pass it explicitly." >&2; exit 2; }
+  SEQ_NAME="${seqs[0]}"
+fi
+
+FOV_X="${FOV_X:-60}"
+MAX_POINTS="${MAX_POINTS:-300000}"
+SOR_NEIGHBORS="${SOR_NEIGHBORS:-20}"
+SOR_STD_RATIO="${SOR_STD_RATIO:-1.25}"
+OUT="/workspace/outputs/gs_dataset/$RUN_NAME"
+rm -rf "$OUT"; mkdir -p "$OUT"
+
+cd /opt/SplatSLAM
+python scripts/export_mast3r_to_3dgs.py \
+  --source "$SOURCE" --output "$OUT" --scene "$SEQ_NAME" \
+  --max-points "$MAX_POINTS" --fov-x "$FOV_X"
+# SplatSLAM exporter versions differ: some only create points3D.txt.
+# Generate points3D.ply when necessary before SOR/3DGS.
+SPARSE="$OUT/sparse/0"
+
+if [[ ! -s "$SPARSE/points3D.ply" ]]; then
+  echo "points3D.ply not produced by exporter."
+  echo "Generating points3D.ply from points3D.txt..."
+
+  python /opt/namma/scripts/points3d_txt_to_ply.py \
+    "$SPARSE/points3D.txt" \
+    "$SPARSE/points3D.ply"
+fi
+
+test -s "$SPARSE/points3D.ply"
+
+python -m splatslam.sor_denoise \
+  --sparse_dir "$OUT/sparse/0" \
+  --nb_neighbors "$SOR_NEIGHBORS" --std_ratio "$SOR_STD_RATIO"
+
+test -s "$OUT/sparse/0/cameras.txt"
+test -s "$OUT/sparse/0/images.txt"
+test -s "$OUT/sparse/0/points3D.ply"
+echo "3DGS dataset: $OUT"
+
