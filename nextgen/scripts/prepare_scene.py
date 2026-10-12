@@ -12,6 +12,8 @@ import cv2
 import numpy as np
 import yaml
 
+from video_io import RawVideoReader
+
 
 @dataclass
 class Candidate:
@@ -23,25 +25,6 @@ class Candidate:
     bright_clip: float
     score: float
     descriptor: np.ndarray
-
-
-def open_video(video: Path) -> cv2.VideoCapture:
-    """Open the coded video stream without applying display-rotation metadata.
-
-    ADVIO calibration is defined in the sensor/coded-frame orientation
-    (720x1280). OpenCV/FFmpeg may otherwise auto-rotate the stream to 1280x720
-    using container metadata, which makes the calibration appear incompatible.
-    Keeping the coded orientation also avoids having to rotate tangential
-    distortion coefficients.
-    """
-    cap = cv2.VideoCapture(str(video))
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {video}")
-
-    orientation_auto = getattr(cv2, "CAP_PROP_ORIENTATION_AUTO", None)
-    if orientation_auto is not None:
-        cap.set(orientation_auto, 0)
-    return cap
 
 
 def load_profile(path: Path, width: int, height: int):
@@ -151,7 +134,7 @@ def extract_selected(
     map2: np.ndarray | None,
 ) -> list[dict]:
     wanted = {c.frame_index: (i, c) for i, c in enumerate(selected)}
-    cap = open_video(video)
+    cap = RawVideoReader(video)
 
     records: list[dict] = []
     frame_idx = 0
@@ -207,11 +190,11 @@ def main() -> None:
     image_dir = args.output / "images"
     image_dir.mkdir(parents=True)
 
-    cap = open_video(args.video)
-    fps = float(cap.get(cv2.CAP_PROP_FPS))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap = RawVideoReader(args.video)
+    fps = cap.fps
+    width = cap.width
+    height = cap.height
+    total_frames = cap.total_frames
     if fps <= 0:
         raise RuntimeError("Video FPS is invalid.")
 

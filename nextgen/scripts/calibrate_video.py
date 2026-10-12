@@ -12,6 +12,8 @@ import torch
 import yaml
 from geocalib import GeoCalib
 
+from video_io import RawVideoReader
+
 
 def sharpness(frame: np.ndarray) -> float:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -21,23 +23,12 @@ def sharpness(frame: np.ndarray) -> float:
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
-def open_video(video: Path) -> cv2.VideoCapture:
-    """Decode the coded/sensor orientation, ignoring display rotation metadata."""
-    cap = cv2.VideoCapture(str(video))
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {video}")
-    orientation_auto = getattr(cv2, "CAP_PROP_ORIENTATION_AUTO", None)
-    if orientation_auto is not None:
-        cap.set(orientation_auto, 0)
-    return cap
-
-
 def select_calibration_frames(video: Path, views: int) -> tuple[list[np.ndarray], list[int], float, int, int]:
-    cap = open_video(video)
-    fps = float(cap.get(cv2.CAP_PROP_FPS))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap = RawVideoReader(video)
+    fps = cap.fps
+    width = cap.width
+    height = cap.height
+    total = cap.total_frames
     if total <= 0 or fps <= 0:
         raise RuntimeError("Video frame count/FPS is invalid.")
 
