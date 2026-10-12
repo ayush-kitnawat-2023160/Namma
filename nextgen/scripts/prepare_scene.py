@@ -219,7 +219,11 @@ def main() -> None:
         }
 
     stride = max(1, math.ceil(max(total_frames, 1) / max(args.max_candidates, 1)))
-    print(f"Video (coded orientation): {width}x{height} @ {fps:.3f} FPS, {total_frames} frames")
+    print(
+        f"Video: coded={cap.info.coded_width}x{cap.info.coded_height}, "
+        f"rotation={cap.info.rotation_degrees} deg, "
+        f"working={width}x{height} @ {fps:.3f} FPS, {total_frames} frames"
+    )
     print(f"Candidate stride: {stride} (target <= {args.max_candidates})")
     print(f"Target selected views: {args.target_views}")
     print("Calibration:", "known + rectified" if args.camera_profile else "unknown (no undistortion)")

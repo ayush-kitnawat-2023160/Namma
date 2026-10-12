@@ -12,23 +12,32 @@ import numpy as np
 
 @dataclass(frozen=True)
 class VideoInfo:
+    coded_width: int
+    coded_height: int
     width: int
     height: int
     fps: float
     total_frames: int
     duration: float
+    rotation_degrees: int
 
 
 def probe_video(path: Path) -> VideoInfo:
-    """Return coded-stream metadata, without applying display rotation tags."""
+    """Return video metadata and the display-oriented dimensions.
+
+    Many phone videos (including ADVIO's iPhone videos) are physically encoded
+    as 1280x720 while carrying a 90-degree display rotation. The calibration,
+    however, is defined in the displayed portrait frame (720x1280). We therefore
+    expose both the coded and display-oriented dimensions here.
+    """
     cmd = [
         "ffprobe",
         "-v",
         "error",
         "-select_streams",
         "v:0",
-        "-show_entries",
-        "stream=width,height,avg_frame_rate,r_frame_rate,nb_frames:format=duration",
+        "-show_streams",
+        "-show_format",
         "-of",
         "json",
         str(path),
@@ -40,8 +49,30 @@ def probe_video(path: Path) -> VideoInfo:
         raise RuntimeError(f"No video stream found in {path}")
     stream = streams[0]
 
-    width = int(stream["width"])
-    height = int(stream["height"])
+    coded_width = int(stream["width"])
+    coded_height = int(stream["height"])
+
+    rotation = 0
+    tags = stream.get("tags") or {}
+    if "rotate" in tags:
+        try:
+            rotation = int(round(float(tags["rotate"])))
+        except Exception:
+            rotation = 0
+    if rotation == 0:
+        for side_data in stream.get("side_data_list") or []:
+            if "rotation" in side_data:
+                try:
+                    rotation = int(round(float(side_data["rotation"])))
+                    break
+                except Exception:
+                    pass
+
+    normalized_rotation = rotation % 360
+    if normalized_rotation in (90, 270):
+        width, height = coded_height, coded_width
+    else:
+        width, height = coded_width, coded_height
 
     rate = stream.get("avg_frame_rate") or stream.get("r_frame_rate") or "0/1"
     try:
@@ -61,20 +92,24 @@ def probe_video(path: Path) -> VideoInfo:
         total_frames = max(1, int(round(duration * fps)))
 
     return VideoInfo(
+        coded_width=coded_width,
+        coded_height=coded_height,
         width=width,
         height=height,
         fps=fps,
         total_frames=total_frames,
         duration=duration,
+        rotation_degrees=rotation,
     )
 
 
 class RawVideoReader:
-    """Sequential BGR decoder that preserves the coded/sensor orientation.
+    """Sequential BGR decoder in display orientation.
 
-    FFmpeg is invoked with ``-noautorotate`` so container/display rotation
-    metadata is ignored. This is essential when camera intrinsics/distortion are
-    defined in the original sensor frame, as with ADVIO.
+    FFmpeg's normal autorotation is intentionally retained. This is important for
+    ADVIO: the MOV is encoded as landscape frames but documented/captured as a
+    portrait camera stream, and its calibration principal point is in that
+    portrait frame.
     """
 
     def __init__(self, path: Path):
@@ -85,7 +120,6 @@ class RawVideoReader:
             "ffmpeg",
             "-v",
             "error",
-            "-noautorotate",
             "-i",
             str(self.path),
             "-map",
@@ -160,4 +194,3 @@ class RawVideoReader:
 
     def __exit__(self, exc_type, exc, tb):
         self.release()
-
