@@ -1,0 +1,41 @@
+source:
+  nextgen_root: /workspace/nextgen
+  semantic_root: /workspace/semantic
+
+semantic:
+  # Phase-1 MVP. Expand after the geometry path is validated.
+  stuff_classes:
+    - floor
+    - wall
+    - ceiling
+  object_classes:
+    - chair
+    - table
+    - sofa
+    - pillar
+    - cabinet
+    - door
+  min_depth_confidence: 0.20
+
+fusion:
+  # Used later when 2D masks are fused with depth + BA cameras.
+  voxel_size: 0.02
+  instance_merge_iou: 0.25
+  instance_merge_distance: 0.40
+
+layout:
+  plane_distance_threshold: 0.03
+  plane_min_points: 2500
+  simplify_tolerance: 0.03
+
+meshing:
+  tsdf_voxel_size: 0.01
+  tsdf_truncation: 0.04
+  max_mesh_triangles: 150000
+  collision_max_triangles: 5000
+
+export:
+  primary_format: glb
+  keep_individual_objects: true
+  write_scene_graph_json: true
+
