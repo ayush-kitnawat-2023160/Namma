@@ -3,19 +3,35 @@ source:
   semantic_root: /workspace/semantic
 
 semantic:
-  # Phase-1 MVP. Expand after the geometry path is validated.
-  stuff_classes:
-    - floor
-    - wall
-    - ceiling
-  object_classes:
-    - chair
-    - table
-    - sofa
-    - pillar
-    - cabinet
-    - door
+  # Phase-1 MVP. Expand only after the geometry path is validated.
   min_depth_confidence: 0.20
+
+segmentation:
+  # Structural/stuff segmentation uses ADE20K semantics. Grounding DINO finds
+  # object boxes and SAM2 turns those boxes into precise instance masks.
+  stuff_model: facebook/mask2former-swin-small-ade-semantic
+  detector_model: IDEA-Research/grounding-dino-tiny
+  sam2_model: facebook/sam2.1-hiera-small
+
+  stuff_classes:
+    floor: [floor]
+    wall: [wall]
+    ceiling: [ceiling]
+    pillar: [column, pillar]
+    door: [door]
+
+  object_prompts:
+    chair: [chair, armchair]
+    table: [table, desk]
+    sofa: [sofa, couch]
+    cabinet: [cabinet, cupboard]
+    door: [door]
+
+  box_threshold: 0.30
+  text_threshold: 0.25
+  nms_iou: 0.55
+  min_mask_area: 250
+  overlay_alpha: 0.45
 
 fusion:
   # Used later when 2D masks are fused with depth + BA cameras.
@@ -38,4 +54,3 @@ export:
   primary_format: glb
   keep_individual_objects: true
   write_scene_graph_json: true
-

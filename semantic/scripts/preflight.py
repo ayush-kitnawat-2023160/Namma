@@ -15,6 +15,8 @@ MODULES = [
     "skimage",
     "sklearn",
     "networkx",
+    "transformers",
+    "accelerate",
 ]
 
 

@@ -8,3 +8,7 @@ __pycache__/
 .DS_Store
 nextgen/checkpoints/*
 !nextgen/checkpoints/.gitkeep
+semantic/checkpoints/*
+!semantic/checkpoints/.gitkeep
+semantic/hf_cache/*
+!semantic/hf_cache/.gitkeep

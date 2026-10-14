@@ -14,7 +14,7 @@ Commands:
   check                         Check semantic/geometry dependencies
   source <scene>                Validate NextGen artifacts + write source manifest
   status <scene>                Show semantic-stage status for a scene
-  segment <scene>               2D stuff + object-instance masks        [planned]
+  segment <scene> [options]     2D stuff + object-instance masks
   semantic-cloud <scene>        Fuse masks + depth + BA poses in 3D     [planned]
   layout <scene>                Fit floor/wall/ceiling geometry         [planned]
   object-mesh <scene>           Per-instance masked TSDF meshes         [planned]
@@ -25,9 +25,20 @@ Commands:
   fix-perms                     Fix host ownership of semantic outputs
   shell                         Interactive container shell
 
-The current implementation establishes the isolated branch, immutable input
-contract, dependency image, source manifest and stage layout. Geometry/model
-stages are added incrementally without modifying the proven NextGen branch.
+Segmentation options:
+  --limit N                     Evenly sample N views (quick preview)
+  --overwrite                   Replace an existing 01_segmentation stage
+
+Useful segmentation environment variables:
+  NS_STUFF_MODEL
+  NS_DETECTOR_MODEL
+  NS_SAM2_MODEL
+  NS_BOX_THRESHOLD
+  NS_TEXT_THRESHOLD
+  NS_NMS_IOU
+  NS_MIN_MASK_AREA
+  NS_SEGMENT_LIMIT
+  NS_SEGMENT_OVERWRITE=1
 EOF
 }
 
@@ -53,14 +64,18 @@ case "${1:-help}" in
     [[ $# -eq 2 ]] || { echo "Usage: status <scene>" >&2; exit 2; }
     exec python /opt/namma-semantic/scripts/status.py --scene "$2"
     ;;
-  segment|semantic-cloud|layout|object-mesh|texture|scene|viewer|pipeline)
+  segment)
+    shift
+    exec python /opt/namma-semantic/scripts/segment_scene.py "$@"
+    ;;
+  semantic-cloud|layout|object-mesh|texture|scene|viewer|pipeline)
     not_implemented "$1"
     ;;
   fix-perms)
     uid="${HOST_UID:-1000}"
     gid="${HOST_GID:-1000}"
-    chown -R "${uid}:${gid}" /workspace/semantic
-    echo "Fixed semantic output ownership to ${uid}:${gid}."
+    chown -R "${uid}:${gid}" /workspace/semantic /workspace/hf_cache
+    echo "Fixed semantic output/cache ownership to ${uid}:${gid}."
     ;;
   shell|bash)
     exec bash
@@ -71,4 +86,3 @@ case "${1:-help}" in
     exit 2
     ;;
 esac
-

@@ -175,9 +175,76 @@ Check stage status:
 ./run_semantic.sh status advio_nextgen
 ```
 
+## Stage 1: 2D scene understanding
+
+Stage 1 is now implemented as a hybrid segmentation stack:
+
+```text
+selected full-resolution RGB
+        |
+        +--> Mask2Former / ADE20K
+        |      -> floor / wall / ceiling / pillar / door semantic map
+        |
+        +--> Grounding DINO
+               -> chair / table / sofa / cabinet / door boxes
+                        |
+                        v
+                       SAM2
+                        -> precise per-object masks
+```
+
+The models are intentionally loaded through Transformers rather than installing
+the custom Grounding-DINO/SAM2 CUDA repositories into the validated NextGen
+environment. Hugging Face model files are cached persistently under
+`semantic/hf_cache/` and are not committed to git.
+
+For the first test, run only a few evenly spaced frames:
+
+```bash
+./run_semantic.sh segment advio_nextgen --limit 8
+```
+
+Inspect:
+
+```text
+outputs/semantic/advio_nextgen/01_segmentation/contact_sheet.jpg
+```
+
+If those masks look correct, replace the preview with all 120 views:
+
+```bash
+./run_semantic.sh segment advio_nextgen --overwrite
+```
+
+Stage 1 writes:
+
+```text
+01_segmentation/
+  semantic/       uint8 structural class maps (0=background)
+  masks/          individual binary object masks per frame
+  instance_maps/  uint16 frame-local instance-ID maps
+  instances/      per-frame boxes, scores, classes and mask paths
+  overlays/       RGB quality-control overlays
+  labels.json
+  detections.json
+  summary.json
+  contact_sheet.jpg
+```
+
+Instance IDs in this stage are **frame-local**. Stage 2 will fuse repeated 2D
+observations through the BA coordinate frame and assign persistent 3D object IDs.
+
+Useful threshold overrides are available without editing code, for example:
+
+```bash
+NS_BOX_THRESHOLD=0.25 \
+NS_MIN_MASK_AREA=150 \
+./run_semantic.sh segment advio_nextgen --overwrite --limit 12
+```
+
 ## Implementation order
 
-1. 2D segmentation: stuff masks + persistent object-instance masks.
+1. 2D segmentation: structural semantic masks + frame-local object masks. **Implemented.**
 2. Semantic RGB-D fusion in the BA/COLMAP world frame.
 3. Layout fitting: robust floor/wall/ceiling/pillar planes.
 4. Per-object masked TSDF fusion and mesh extraction.
@@ -188,4 +255,3 @@ Check stage status:
 
 Only after this observed-geometry path is stable should we add a separate
 unseen-surface completion stage.
-

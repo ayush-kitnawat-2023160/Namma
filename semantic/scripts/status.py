@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 
@@ -26,10 +27,15 @@ def main() -> None:
     print(f"Semantic scene: {args.scene}")
     for directory, description in STAGES:
         path = base / directory
-        marker = "READY" if path.exists() and any(path.iterdir()) else "pending"
+        if directory == "00_source":
+            marker = "READY" if (path / "manifest.json").is_file() else "pending"
+        elif directory == "01_segmentation" and (path / "summary.json").is_file():
+            summary = json.loads((path / "summary.json").read_text())
+            marker = "READY" if summary.get("complete_dataset") else "PREVIEW"
+        else:
+            marker = "READY" if path.exists() and any(path.iterdir()) else "pending"
         print(f"[{marker:7}] {directory:20} {description}")
 
 
 if __name__ == "__main__":
     main()
-
