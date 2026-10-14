@@ -242,6 +242,11 @@ NS_MIN_MASK_AREA=150 \
 ./run_semantic.sh segment advio_nextgen --overwrite --limit 12
 ```
 
+The default configuration also applies a stricter score threshold to `door`
+detections than to chairs/tables/sofas. This keeps the global detector threshold
+low enough for partially occluded furniture while reducing false door boxes on
+windows, wall panels and other large rectangular regions.
+
 ## Implementation order
 
 1. 2D segmentation: structural semantic masks + frame-local object masks. **Implemented.**

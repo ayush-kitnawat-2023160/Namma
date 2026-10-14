@@ -297,6 +297,7 @@ def run_instances(
     nms_iou: float,
     min_mask_area: int,
     overlay_alpha: float,
+    class_score_thresholds: dict[str, float],
     device: str,
 ) -> tuple[list[dict], Counter]:
     prompts, alias_to_class = flatten_prompt_aliases(prompt_cfg)
@@ -358,11 +359,15 @@ def run_instances(
             canonical = canonical_from_text(raw_value, alias_to_class)
             if canonical is None:
                 continue
+            numeric_score = float(score.detach().cpu().item())
+            class_threshold = float(class_score_thresholds.get(canonical, box_threshold))
+            if numeric_score < class_threshold:
+                continue
             candidates.append(
                 {
                     "class": canonical,
                     "raw_label": str(raw_value),
-                    "score": float(score.detach().cpu().item()),
+                    "score": numeric_score,
                     "box": [
                         float(value)
                         for value in box.detach().cpu().tolist()
@@ -625,6 +630,10 @@ def main() -> None:
         nms_iou,
         min_mask_area,
         overlay_alpha,
+        {
+            str(key): float(value)
+            for key, value in config.get("class_score_thresholds", {}).items()
+        },
         device,
     )
 
@@ -656,6 +665,7 @@ def main() -> None:
             "text": text_threshold,
             "nms_iou": nms_iou,
             "min_mask_area": min_mask_area,
+            "class_score_thresholds": config.get("class_score_thresholds", {}),
         },
         "structural_pixels": stuff_pixels,
         "object_instances": dict(object_counts),

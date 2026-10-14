@@ -33,6 +33,12 @@ segmentation:
   min_mask_area: 250
   overlay_alpha: 0.45
 
+  # Keep the global threshold permissive enough for partially occluded chairs
+  # and tables, but require stronger evidence for classes that Grounding DINO
+  # tends to confuse with large rectangular indoor structures.
+  class_score_thresholds:
+    door: 0.45
+
 fusion:
   # Used later when 2D masks are fused with depth + BA cameras.
   voxel_size: 0.02
