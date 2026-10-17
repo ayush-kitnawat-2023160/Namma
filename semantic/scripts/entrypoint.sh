@@ -20,7 +20,7 @@ Commands:
   object-mesh <scene>           Per-instance observed-surface TSDF meshes
   texture <scene>               UV unwrap + bake observed RGB textures
   scene <scene>                 Assemble final GLB + scene graph + collisions
-  viewer <scene>                First-person scene package              [planned]
+  viewer <scene>                Build browser first-person walkthrough package
   pipeline <scene>              Full semantic extension                 [planned]
   fix-perms                     Fix host ownership of semantic outputs
   shell                         Interactive container shell
@@ -97,6 +97,12 @@ Useful Stage-6 environment variables:
   NS_SCENE_METERS_PER_UNIT      Optional metric calibration scalar
   NS_SCENE_COLLISION_MAX_TRIANGLES
   NS_SCENE_OVERWRITE=1
+
+Viewer options:
+  --overwrite                   Replace an existing 07_viewer stage
+
+Useful Stage-7 environment variables:
+  NS_VIEWER_OVERWRITE=1
 EOF
 }
 
@@ -146,7 +152,11 @@ case "${1:-help}" in
     shift
     exec python /opt/namma-semantic/scripts/assemble_scene.py "$@"
     ;;
-  viewer|pipeline)
+  viewer)
+    shift
+    exec python /opt/namma-semantic/scripts/build_viewer.py "$@"
+    ;;
+  pipeline)
     not_implemented "$1"
     ;;
   fix-perms)

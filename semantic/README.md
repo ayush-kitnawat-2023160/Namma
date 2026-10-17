@@ -624,29 +624,99 @@ meters_per_unit = real_distance_metres / reconstructed_distance_units
 and rerun only Stage 6:
 
 ```bash
-NS_SCENE_METERS_PER_UNIT=0.73 \
+NS_SCENE_METERS_PER_UNIT=<computed_real_scale> \
 ./run_semantic.sh scene advio_nextgen --overwrite
 ```
 
 Stage 6 then applies the uniform scale to the visual geometry, collision
 geometry, and camera trajectory together and records that metric calibration in
-the scene graph. The example scalar above is illustrative only; it must come
-from a real measurement for the actual scene.
+the scene graph. Do not copy a made-up example scalar: it must come from an
+actual measured distance in the reconstructed scene.
 
 USD export is deliberately deferred. GLB is the validated primary asset for
 the current viewer/simulation MVP; a later engine-specific exporter can consume
 the same scene graph without changing the reconstruction stages.
 
+## Stage 7: first-person browser walkthrough
+
+Stage 7 packages the Stage-6 visual/collision scenes into a browser runtime.
+The viewer uses the fitted Stage-3 up vector to rotate the arbitrary COLMAP
+world onto browser `+Y` at runtime; no reconstruction files are rewritten.
+
+```text
+06_scene/digital_twin.glb
+06_scene/collision_scene.glb
+06_scene/scene_graph.json
+06_scene/camera_trajectory.json
+                 |
+                 v
+      Babylon.js first-person viewer
+                 |
+      +----------+-----------+
+      |          |           |
+      v          v           v
+     WASD     mouse look   collision/gravity
+      |          |           |
+      +----------+-----------+
+                 v
+          walk through scene
+```
+
+Build the package:
+
+```bash
+./run_semantic.sh viewer advio_nextgen
+```
+
+Outputs:
+
+```text
+07_viewer/
+  assets/
+    digital_twin.glb
+    collision_scene.glb
+  index.html
+  app.js
+  style.css
+  viewer_config.json
+  scene_graph.json
+  camera_trajectory.json
+  serve.py
+  README.txt
+  summary.json
+```
+
+Serve it with standard Python:
+
+```bash
+cd outputs/semantic/advio_nextgen/07_viewer
+python3 serve.py --port 8000
+```
+
+Then open `http://127.0.0.1:8000` in a browser. When the viewer lives on a
+remote GPU server, either copy `07_viewer/` to the local machine or tunnel the
+port over SSH. The generated `README.txt` includes the exact pattern.
+
+Controls are mouse-look, WASD movement, Shift sprint, `R` reset to the selected
+BA camera pose, `G` gravity toggle, `C` collision debug display, and `H` HUD.
+Movement, gravity and the player collider scale from scene bounds so the viewer
+still works before metric calibration. If Stage 6 is marked metric but the
+scene dimensions look implausibly small, the viewer displays a warning instead
+of silently trusting the units.
+
+The runtime currently fetches Babylon.js and its glTF loader from the official
+Babylon CDN. The generated geometry/assets themselves are local.
+
 ## Implementation order
 
 1. 2D segmentation: structural semantic masks + frame-local object masks. **Implemented.**
-2. Semantic RGB-D fusion in the BA/COLMAP world frame.
-3. Layout fitting: robust floor/wall/ceiling/pillar planes.
-4. Per-object masked TSDF fusion and mesh extraction.
-5. Mesh cleanup + simplified collision meshes.
-6. RGB texture/vertex-color baking from the original selected views.
-7. GLB scene + scene graph, then optional USD.
-8. First-person viewer with collision.
+2. Semantic RGB-D fusion in the BA/COLMAP world frame. **Implemented.**
+3. Layout fitting: robust floor/wall/ceiling/pillar planes. **Implemented.**
+4. Per-object masked TSDF fusion and mesh extraction. **Implemented.**
+5. Mesh cleanup + simplified collision meshes. **Implemented.**
+6. UV/RGB texture baking from the original selected views. **Implemented.**
+7. GLB scene + scene graph + collisions; optional USD later. **Implemented.**
+8. First-person browser viewer with collision. **Implemented.**
 
 Only after this observed-geometry path is stable should we add a separate
 unseen-surface completion stage.

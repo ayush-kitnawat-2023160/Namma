@@ -54,13 +54,13 @@ for name in \
   NS_TEXTURE_MIN_INCIDENCE NS_TEXTURE_MIN_AREA \
   NS_TEXTURE_DEPTH_TOLERANCE NS_TEXTURE_PADDING NS_TEXTURE_OVERWRITE \
   NS_SCENE_METERS_PER_UNIT NS_SCENE_COLLISION_MAX_TRIANGLES \
-  NS_SCENE_OVERWRITE
+  NS_SCENE_OVERWRITE NS_VIEWER_OVERWRITE
 do
   [[ -n "${!name:-}" ]] && COMMON+=( -e "$name=${!name}" )
 done
 
 case "$CMD" in
-  help|-h|--help|check|status|source|semantic-cloud|layout|object-mesh|texture|scene|fix-perms|shell|bash) GPU_ARGS=() ;;
+  help|-h|--help|check|status|source|semantic-cloud|layout|object-mesh|texture|scene|viewer|fix-perms|shell|bash) GPU_ARGS=() ;;
   *) GPU_ARGS=(--gpus all) ;;
 esac
 

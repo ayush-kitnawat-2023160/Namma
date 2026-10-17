@@ -113,3 +113,12 @@ export:
   object_collision: convex_hull
   architecture_collision: source_mesh
   write_camera_trajectory: true
+
+viewer:
+  movement_speed_fraction: 0.025
+  player_height_fraction: 0.12
+  player_radius_fraction: 0.025
+  gravity_fraction: 0.012
+  min_player_radius: 0.005
+  max_player_radius: 0.30
+  start_camera_index: 0
