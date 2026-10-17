@@ -40,10 +40,19 @@ segmentation:
     door: 0.45
 
 fusion:
-  # Used later when 2D masks are fused with depth + BA cameras.
+  # Stage 2 projects the already Sim(3)-aligned dense VGGT cloud into every
+  # BA-refined COLMAP camera, then transfers Stage-1 labels by visibility-aware
+  # multi-view voting. The dense cloud was already confidence-filtered in VGGT.
   voxel_size: 0.02
-  instance_merge_iou: 0.25
-  instance_merge_distance: 0.40
+  z_buffer_tolerance: 0.01
+  min_semantic_votes: 2
+  min_vote_ratio: 0.35
+  min_fragment_points: 40
+  instance_merge_overlap: 0.15
+  instance_merge_min_shared_points: 25
+  instance_merge_distance: 0.75
+  min_track_views: 2
+  min_instance_points: 150
 
 layout:
   plane_distance_threshold: 0.03

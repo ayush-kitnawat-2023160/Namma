@@ -247,6 +247,63 @@ detections than to chairs/tables/sofas. This keeps the global detector threshold
 low enough for partially occluded furniture while reducing false door boxes on
 windows, wall panels and other large rectangular regions.
 
+## Stage 2: semantic 3D fusion
+
+Stage 2 does **not** reconstruct geometry again. It reuses the confidence-filtered
+VGGT dense cloud that NextGen already aligned into the global COLMAP/BA frame:
+
+```text
+04_gs_dataset/sparse/0/points3D.ply
+             +
+03_sfm/model (120 BA cameras)
+             +
+01_segmentation semantic/instance maps
+             |
+             v
+visibility-aware projection + z-buffer
+             |
+             +--> multi-view structural voting
+             |
+             +--> per-frame 3D object fragments
+                         |
+                         v
+                 overlap graph fusion
+                         |
+                         v
+                 persistent 3D objects
+```
+
+Run it after a complete Stage-1 pass:
+
+```bash
+./run_semantic.sh semantic-cloud advio_nextgen
+```
+
+If tuning requires a rerun:
+
+```bash
+./run_semantic.sh semantic-cloud advio_nextgen --overwrite
+```
+
+The stage writes:
+
+```text
+02_semantic_cloud/
+  semantic_scene.ply       semantic palette + semantic metadata
+  semantic_scene_rgb.ply   original RGB + semantic metadata
+  classes/                 one RGB PLY per semantic class
+  instances/               persistent chair/table/sofa/... PLYs
+  fragments.json           frame-local 3D fragment diagnostics
+  instance_tracks.json     fragment -> persistent-object associations
+  labels.json
+  summary.json
+```
+
+`semantic_scene*.ply` retain `semantic_id`, semantic confidence, vote count,
+visibility count and the source dense-point index as PLY vertex properties.
+This lets later layout/meshing stages remain traceable back to the original
+aligned VGGT geometry.
+
 ## Implementation order
 
 1. 2D segmentation: structural semantic masks + frame-local object masks. **Implemented.**

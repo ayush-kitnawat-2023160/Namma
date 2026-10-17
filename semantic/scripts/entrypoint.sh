@@ -15,7 +15,7 @@ Commands:
   source <scene>                Validate NextGen artifacts + write source manifest
   status <scene>                Show semantic-stage status for a scene
   segment <scene> [options]     2D stuff + object-instance masks
-  semantic-cloud <scene>        Fuse masks + depth + BA poses in 3D     [planned]
+  semantic-cloud <scene>        Fuse Stage-1 masks into BA-aligned 3D
   layout <scene>                Fit floor/wall/ceiling geometry         [planned]
   object-mesh <scene>           Per-instance masked TSDF meshes         [planned]
   texture <scene>               Bake observed RGB onto meshes           [planned]
@@ -39,6 +39,21 @@ Useful segmentation environment variables:
   NS_MIN_MASK_AREA
   NS_SEGMENT_LIMIT
   NS_SEGMENT_OVERWRITE=1
+
+Semantic-cloud options:
+  --overwrite                   Replace an existing 02_semantic_cloud stage
+
+Useful Stage-2 environment variables:
+  NS_FUSION_Z_TOLERANCE
+  NS_FUSION_MIN_VOTES
+  NS_FUSION_MIN_RATIO
+  NS_FUSION_MIN_FRAGMENT_POINTS
+  NS_FUSION_INSTANCE_OVERLAP
+  NS_FUSION_INSTANCE_MIN_SHARED
+  NS_FUSION_INSTANCE_DISTANCE
+  NS_FUSION_MIN_TRACK_VIEWS
+  NS_FUSION_MIN_INSTANCE_POINTS
+  NS_FUSION_OVERWRITE=1
 EOF
 }
 
@@ -68,7 +83,11 @@ case "${1:-help}" in
     shift
     exec python /opt/namma-semantic/scripts/segment_scene.py "$@"
     ;;
-  semantic-cloud|layout|object-mesh|texture|scene|viewer|pipeline)
+  semantic-cloud)
+    shift
+    exec python /opt/namma-semantic/scripts/fuse_semantic_cloud.py "$@"
+    ;;
+  layout|object-mesh|texture|scene|viewer|pipeline)
     not_implemented "$1"
     ;;
   fix-perms)

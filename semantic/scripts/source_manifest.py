@@ -38,6 +38,7 @@ def main() -> None:
         "vggt_dense_cloud": src / "02_vggt/pointcloud.ply",
         "sfm_model": src / "03_sfm/model",
         "gs_dataset": src / "04_gs_dataset",
+        "aligned_dense_cloud": src / "04_gs_dataset/sparse/0/points3D.ply",
     }
 
     missing = [f"{name}: {path}" for name, path in required.items() if not path.exists()]
@@ -110,4 +111,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
