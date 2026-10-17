@@ -37,7 +37,7 @@ INDEX_HTML = r'''<!doctype html>
       Click view: mouse look<br />
       W A S D: move &nbsp; Shift: faster<br />
       R: reset &nbsp; G: gravity &nbsp; C: collision debug<br />
-      M: Gaussian/mesh visual &nbsp; H: HUD
+      M: Gaussian/mesh visual &nbsp; P: render quality &nbsp; H: HUD
     </div>
   </div>
   <div id="crosshair">+</div>
@@ -125,6 +125,10 @@ APP_JS = r'''(() => {
 
     const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true });
     const scene = new BABYLON.Scene(engine);
+    // COLMAP, Graphdeco and glTF are authored in right-handed coordinates.
+    // Keeping Babylon right-handed prevents the glTF loader from injecting its
+    // RH->LH root conversion while Gaussian PLY remains unconverted.
+    scene.useRightHandedSystem = Boolean(config.right_handed_colmap);
     scene.clearColor = new BABYLON.Color4(0.055, 0.065, 0.08, 1.0);
     scene.collisionsEnabled = true;
     scene.gravity = new BABYLON.Vector3(0, -config.gravity, 0);
@@ -174,11 +178,24 @@ APP_JS = r'''(() => {
 
     let gaussianVisual = Boolean(gaussian) && config.visual_mode !== "mesh";
     const units = graph.units.metric_calibrated ? "metres" : "reconstruction units";
+    const gaussianScales = [
+      Math.max(1.0, Number(config.gaussian_hardware_scaling || 1.5)),
+      2.0,
+      1.0,
+    ].filter((value, index, array) => array.indexOf(value) === index);
+    let gaussianScaleIndex = 0;
+    const applyRenderScale = () => {
+      const level = gaussianVisual
+        ? gaussianScales[gaussianScaleIndex]
+        : Number(config.mesh_hardware_scaling || 1.0);
+      engine.setHardwareScalingLevel(level);
+    };
     const updateVisualMode = () => {
       meshRoot.setEnabled(!gaussianVisual);
       gaussianRoot.setEnabled(gaussianVisual && Boolean(gaussian));
       const visualLabel = gaussianVisual ? "Gaussian visual" : "explicit mesh visual";
       unitsEl.textContent = `${graph.nodes.length} semantic assets · ${units} · ${visualLabel}`;
+      applyRenderScale();
     };
     updateVisualMode();
 
@@ -238,6 +255,10 @@ APP_JS = r'''(() => {
         gaussianVisual = !gaussianVisual;
         updateVisualMode();
       }
+      if (event.code === "KeyP" && gaussianVisual) {
+        gaussianScaleIndex = (gaussianScaleIndex + 1) % gaussianScales.length;
+        applyRenderScale();
+      }
       if (event.code === "KeyH") hudEl.style.display = hudEl.style.display === "none" ? "block" : "none";
       if (event.code === "ShiftLeft" || event.code === "ShiftRight") camera.speed = config.movement_speed * 2.4;
     });
@@ -253,7 +274,8 @@ APP_JS = r'''(() => {
     scene.onBeforeRenderObservable.add(() => {
       const p = camera.position;
       const mode = gaussianVisual ? "GS" : "mesh";
-      coordsEl.textContent = `x ${p.x.toFixed(3)}   y ${p.y.toFixed(3)}   z ${p.z.toFixed(3)} · ${engine.getFps().toFixed(0)} FPS · ${mode} · gravity ${gravityEnabled ? "on" : "off"}`;
+      const quality = gaussianVisual ? ` · render ${engine.getHardwareScalingLevel().toFixed(2)}x` : "";
+      coordsEl.textContent = `x ${p.x.toFixed(3)}   y ${p.y.toFixed(3)}   z ${p.z.toFixed(3)} · ${engine.getFps().toFixed(0)} FPS · ${mode}${quality} · gravity ${gravityEnabled ? "on" : "off"}`;
     });
 
     engine.runRenderLoop(() => scene.render());
@@ -319,6 +341,7 @@ Controls:
     G            toggle gravity
     C            toggle collision-mesh debug display
     M            toggle Gaussian vs explicit mesh visual
+    P            cycle Gaussian render resolution/performance
     H            hide/show HUD
 
 The viewer uses Babylon.js and the glTF loader from the Babylon CDN, so the
@@ -464,6 +487,9 @@ def main() -> None:
         # Stage-6 visuals/collisions and BA trajectory may be uniformly scaled,
         # but the trainer PLY always remains in original BA reconstruction units.
         "gaussian_scale": float(graph.get("units", {}).get("meters_per_unit") or 1.0),
+        "right_handed_colmap": bool(config.get("right_handed_colmap", True)),
+        "gaussian_hardware_scaling": float(config.get("gaussian_hardware_scaling", 1.5)),
+        "mesh_hardware_scaling": float(config.get("mesh_hardware_scaling", 1.0)),
         "babylon_cdn": "https://cdn.babylonjs.com/babylon.js",
         "babylon_loaders_cdn": "https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js",
     }
@@ -503,6 +529,8 @@ def main() -> None:
         "visual_mode": visual_mode,
         "gaussian_asset": gaussian_asset,
         "gaussian_iteration": gaussian_iteration,
+        "right_handed_colmap": bool(config.get("right_handed_colmap", True)),
+        "gaussian_hardware_scaling": float(config.get("gaussian_hardware_scaling", 1.5)),
         "warning": warning,
         "serve": "python3 serve.py --port 8000",
         "entrypoint": "index.html",

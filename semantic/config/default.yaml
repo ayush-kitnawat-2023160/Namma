@@ -117,6 +117,9 @@ export:
 viewer:
   visual_mode: gaussian
   keep_mesh_fallback: true
+  right_handed_colmap: true
+  gaussian_hardware_scaling: 1.5
+  mesh_hardware_scaling: 1.0
   movement_speed_fraction: 0.025
   player_height_fraction: 0.12
   player_radius_fraction: 0.025

@@ -648,6 +648,14 @@ NextGen/Graphdeco Gaussian PLY is the rendered appearance, while the Stage-6
 explicit scene remains responsible for semantics and low-poly collision. This
 avoids throwing away 3DGS appearance quality just to obtain simulator geometry.
 
+The browser scene is kept in a **right-handed COLMAP/BA coordinate system**.
+This matters because glTF/GLB is right-handed while Babylon's default scene is
+left-handed, and Gaussian PLY has no universal handedness conversion. Keeping
+the Babylon scene right-handed prevents the GLB loader from injecting a hidden
+RH->LH root conversion that the Gaussian loader would not share. The fitted
+floor-up rotation is then applied once to the visual mesh, Gaussian splat,
+collision world and BA camera spawn in the same basis.
+
 ```text
 05_gs_model/.../point_cloud.ply   ---> Gaussian visual layer
                  |
@@ -710,6 +718,10 @@ Controls are mouse-look, WASD movement, Shift sprint, `R` reset to the selected
 BA camera pose, `G` gravity toggle, `C` collision debug display, and `H` HUD.
 `M` toggles between the Gaussian visual and the explicit textured mesh so the
 two representations can be compared in the same camera/world frame.
+`P` cycles Gaussian render scale (quality vs FPS). The default is 1.5x hardware
+scaling, which renders fewer pixels than full browser resolution while keeping
+the same splat set; use `P` to compare 2.0x performance mode and 1.0x full
+resolution.
 Movement, gravity and the player collider scale from scene bounds so the viewer
 still works before metric calibration. If Stage 6 is marked metric but the
 scene dimensions look implausibly small, the viewer displays a warning instead
