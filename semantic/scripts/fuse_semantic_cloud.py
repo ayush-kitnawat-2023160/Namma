@@ -14,7 +14,7 @@ import numpy as np
 import pycolmap
 import yaml
 from plyfile import PlyData, PlyElement
-from scipy.sparse import csr_matrix
+from scipy.optimize import linear_sum_assignment
 
 
 NEXTGEN_ROOT = Path("/workspace/nextgen")
@@ -45,28 +45,6 @@ class Fragment:
     point_ids: np.ndarray
     centroid: np.ndarray
     radius: float
-
-
-class UnionFind:
-    def __init__(self, n: int) -> None:
-        self.parent = list(range(n))
-        self.rank = [0] * n
-
-    def find(self, value: int) -> int:
-        parent = self.parent[value]
-        if parent != value:
-            self.parent[value] = self.find(parent)
-        return self.parent[value]
-
-    def union(self, a: int, b: int) -> None:
-        ra, rb = self.find(a), self.find(b)
-        if ra == rb:
-            return
-        if self.rank[ra] < self.rank[rb]:
-            ra, rb = rb, ra
-        self.parent[rb] = ra
-        if self.rank[ra] == self.rank[rb]:
-            self.rank[ra] += 1
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -228,53 +206,132 @@ def make_fragment(
 
 def associate_fragments(
     fragments: list[Fragment],
-    point_count: int,
     overlap_threshold: float,
     min_shared: int,
     max_distance: float,
-) -> tuple[list[list[int]], int]:
+    max_frame_gap: int,
+) -> tuple[list[list[int]], int, int]:
+    """Associate frame-local fragments into persistent tracks.
+
+    The old implementation built a pairwise overlap graph and returned its
+    connected components. That allows transitive bridges: A~B and B~C can
+    merge A and C even when they are two different objects. Here we process
+    detections in frame order and solve a one-to-one bipartite assignment per
+    class per frame. Therefore a track can never absorb two detections from the
+    same frame, which is a strong cannot-link constraint for static scenes.
+    """
     if not fragments:
-        return [], 0
-    rows = np.concatenate(
-        [np.full(len(fragment.point_ids), index, dtype=np.int32) for index, fragment in enumerate(fragments)]
-    )
-    cols = np.concatenate([fragment.point_ids.astype(np.int32) for fragment in fragments])
-    data = np.ones(len(rows), dtype=np.int32)
-    membership = csr_matrix((data, (rows, cols)), shape=(len(fragments), point_count), dtype=np.int32)
-    intersections = (membership @ membership.T).toarray().astype(np.int32)
-    sizes = np.asarray(membership.sum(axis=1)).reshape(-1).astype(np.int32)
-    uf = UnionFind(len(fragments))
-    edges = 0
+        return [], 0, 0
 
-    by_class: dict[str, list[int]] = defaultdict(list)
+    by_frame_class: dict[tuple[int, str], list[int]] = defaultdict(list)
     for index, fragment in enumerate(fragments):
-        by_class[fragment.class_name].append(index)
+        by_frame_class[(fragment.frame_index, fragment.class_name)].append(index)
 
-    for indices in by_class.values():
-        for pos, i in enumerate(indices):
-            for j in indices[pos + 1 :]:
-                if fragments[i].image == fragments[j].image:
+    tracks_by_class: dict[str, list[dict]] = defaultdict(list)
+    accepted_links = 0
+    rejected_same_frame = 0
+
+    for (frame_index, class_name), current_indices in sorted(by_frame_class.items()):
+        tracks = tracks_by_class[class_name]
+        active_indices = [
+            index
+            for index, track in enumerate(tracks)
+            if frame_index - track["last_frame"] <= max_frame_gap
+        ]
+
+        if active_indices and current_indices:
+            scores = np.full(
+                (len(current_indices), len(active_indices)),
+                -1e6,
+                dtype=np.float64,
+            )
+            for row, fragment_index in enumerate(current_indices):
+                fragment = fragments[fragment_index]
+                for col, track_index in enumerate(active_indices):
+                    track = tracks[track_index]
+                    if frame_index in track["frames"]:
+                        rejected_same_frame += 1
+                        continue
+                    shared = int(
+                        np.intersect1d(
+                            fragment.point_ids,
+                            track["point_ids"],
+                            assume_unique=True,
+                        ).size
+                    )
+                    if shared < min_shared:
+                        continue
+                    # Measure how much of the current observation is already
+                    # explained by this track. Using the ever-growing track
+                    # union as the denominator would make later matches harder.
+                    overlap = shared / max(1, len(fragment.point_ids))
+                    if overlap < overlap_threshold:
+                        continue
+                    distance = float(
+                        np.linalg.norm(fragment.centroid - track["centroid"])
+                    )
+                    allowed = max(
+                        float(max_distance),
+                        0.75 * (fragment.radius + track["radius"]),
+                    )
+                    if distance > allowed:
+                        continue
+                    # Overlap is dominant; shared support and spatial
+                    # consistency only break ties between plausible matches.
+                    support = min(1.0, shared / max(1.0, 4.0 * min_shared))
+                    spatial = max(0.0, 1.0 - distance / max(allowed, 1e-6))
+                    scores[row, col] = overlap + 0.10 * support + 0.05 * spatial
+
+            rows, cols = linear_sum_assignment(-scores)
+            assigned_fragments: set[int] = set()
+            for row, col in zip(rows.tolist(), cols.tolist()):
+                if scores[row, col] <= -1e5:
                     continue
-                shared = int(intersections[i, j])
-                if shared < min_shared:
-                    continue
-                overlap = shared / max(1, min(int(sizes[i]), int(sizes[j])))
-                if overlap < overlap_threshold:
-                    continue
-                distance = float(np.linalg.norm(fragments[i].centroid - fragments[j].centroid))
-                allowed = max(
-                    float(max_distance),
-                    0.75 * (fragments[i].radius + fragments[j].radius),
+                fragment_index = current_indices[row]
+                track_index = active_indices[col]
+                fragment = fragments[fragment_index]
+                track = tracks[track_index]
+                track["fragment_indices"].append(fragment_index)
+                track["frames"].add(frame_index)
+                track["last_frame"] = frame_index
+                track["point_ids"] = np.union1d(
+                    track["point_ids"], fragment.point_ids
                 )
-                if distance > allowed:
-                    continue
-                uf.union(i, j)
-                edges += 1
+                # Recompute geometry from the constituent fragment summaries.
+                members = [fragments[idx] for idx in track["fragment_indices"]]
+                weights = np.asarray([len(member.point_ids) for member in members], dtype=np.float64)
+                centroids = np.stack([member.centroid for member in members])
+                track["centroid"] = np.average(centroids, axis=0, weights=weights)
+                track["radius"] = max(
+                    float(np.linalg.norm(member.centroid - track["centroid"])) + member.radius
+                    for member in members
+                )
+                assigned_fragments.add(fragment_index)
+                accepted_links += 1
+        else:
+            assigned_fragments = set()
 
-    groups: dict[int, list[int]] = defaultdict(list)
-    for index in range(len(fragments)):
-        groups[uf.find(index)].append(index)
-    return list(groups.values()), edges
+        for fragment_index in current_indices:
+            if fragment_index in assigned_fragments:
+                continue
+            fragment = fragments[fragment_index]
+            tracks.append(
+                {
+                    "fragment_indices": [fragment_index],
+                    "frames": {frame_index},
+                    "last_frame": frame_index,
+                    "point_ids": fragment.point_ids.copy(),
+                    "centroid": fragment.centroid.copy(),
+                    "radius": float(fragment.radius),
+                }
+            )
+
+    groups = [
+        track["fragment_indices"]
+        for tracks in tracks_by_class.values()
+        for track in tracks
+    ]
+    return groups, accepted_links, rejected_same_frame
 
 
 def main() -> None:
@@ -300,9 +357,15 @@ def main() -> None:
     merge_distance = float(
         os.environ.get("NS_FUSION_INSTANCE_DISTANCE", fusion["instance_merge_distance"])
     )
+    merge_max_gap = int(
+        os.environ.get("NS_FUSION_INSTANCE_MAX_GAP", fusion["instance_max_frame_gap"])
+    )
     min_track_views = int(os.environ.get("NS_FUSION_MIN_TRACK_VIEWS", fusion["min_track_views"]))
     min_instance_points = int(
         os.environ.get("NS_FUSION_MIN_INSTANCE_POINTS", fusion["min_instance_points"])
+    )
+    min_object_point_votes = int(
+        os.environ.get("NS_FUSION_MIN_OBJECT_POINT_VOTES", fusion["min_object_point_votes"])
     )
 
     semantic_base = SEMANTIC_ROOT / args.scene
@@ -426,12 +489,12 @@ def main() -> None:
             )
 
     print(f"[instances] associating {len(fragments)} multi-view fragments...")
-    groups, graph_edges = associate_fragments(
+    groups, association_links, rejected_same_frame = associate_fragments(
         fragments,
-        point_count,
         merge_overlap,
         merge_min_shared,
         merge_distance,
+        merge_max_gap,
     )
 
     track_candidates = []
@@ -480,7 +543,16 @@ def main() -> None:
         )
         filename = f"{persistent_id}.ply" if exported else None
         if exported:
-            ids = track["point_ids"]
+            raw_ids = track["point_ids"]
+            class_id = class_to_id[track["class"]]
+            supported = votes[raw_ids, class_id] >= min_object_point_votes
+            ids = raw_ids[supported]
+            # Keep a usable object if the conservative multi-view filter is too
+            # harsh for a thin/partially observed surface, but record this in
+            # the track diagnostics.
+            used_vote_filter = len(ids) >= min_instance_points
+            if not used_vote_filter:
+                ids = raw_ids
             write_rgb_ply(instances_dir / filename, xyz[ids], rgb[ids])
             score = min(65535, len(track["views"]))
             replace = score > object_override_score[ids]
@@ -488,6 +560,8 @@ def main() -> None:
             object_override_id[chosen] = class_to_id[track["class"]]
             object_override_score[chosen] = score
             exported_tracks.append(persistent_id)
+            track["exported_point_count"] = int(len(ids))
+            track["used_object_vote_filter"] = bool(used_vote_filter)
         track["persistent_id"] = persistent_id
         track["exported"] = exported
         track["filename"] = filename
@@ -603,7 +677,8 @@ def main() -> None:
         "frames": len(frame_paths),
         "mean_visible_dense_points_per_frame": float(np.mean(visible_per_frame)),
         "fragments": len(fragments),
-        "fragment_graph_edges": graph_edges,
+        "association_links": association_links,
+        "same_frame_links_rejected": rejected_same_frame,
         "track_candidates": len(track_candidates),
         "exported_instances": len(exported_tracks),
         "exported_instances_by_class": dict(track_counts),
@@ -615,9 +690,12 @@ def main() -> None:
             "instance_merge_overlap": merge_overlap,
             "instance_merge_min_shared_points": merge_min_shared,
             "instance_merge_distance": merge_distance,
+            "instance_max_frame_gap": merge_max_gap,
             "min_track_views": min_track_views,
             "min_instance_points": min_instance_points,
+            "min_object_point_votes": min_object_point_votes,
         },
+        "association_method": "frame-aware one-to-one overlap tracking",
         "geometry_source": "BA-aligned confidence-filtered VGGT dense cloud",
         "camera_source": "COLMAP global-BA model",
     }

@@ -51,8 +51,10 @@ fusion:
   instance_merge_overlap: 0.15
   instance_merge_min_shared_points: 25
   instance_merge_distance: 0.75
+  instance_max_frame_gap: 12
   min_track_views: 2
   min_instance_points: 150
+  min_object_point_votes: 2
 
 layout:
   plane_distance_threshold: 0.03

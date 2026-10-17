@@ -273,6 +273,14 @@ visibility-aware projection + z-buffer
                  persistent 3D objects
 ```
 
+Persistent objects are associated with **frame-aware one-to-one tracking**.
+Fragments are matched only to same-class tracks with sufficient shared 3D point
+support and spatial consistency, and a track can never absorb two detections
+from the same frame. This avoids the transitive connected-component failure
+where a single noisy mask could bridge two physically different chairs/tables.
+Tracks are also limited by a configurable frame gap, and exported object points
+prefer support from at least two object-mask observations.
+
 Run it after a complete Stage-1 pass:
 
 ```bash
