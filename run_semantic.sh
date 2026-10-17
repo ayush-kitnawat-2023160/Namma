@@ -49,13 +49,16 @@ for name in \
   NS_LAYOUT_MAX_WALLS NS_LAYOUT_OVERWRITE \
   NS_TSDF_VOXEL_SIZE NS_TSDF_TRUNCATION NS_MESH_CONFIDENCE_PERCENTILE \
   NS_MESH_MIN_VIEWS NS_MESH_MIN_MASK_PIXELS NS_MESH_DUPLICATE_OVERLAP \
-  NS_MESH_OVERWRITE
+  NS_MESH_OVERWRITE \
+  NS_TEXTURE_RESOLUTION NS_ARCH_TEXTURE_RESOLUTION \
+  NS_TEXTURE_MIN_INCIDENCE NS_TEXTURE_MIN_AREA \
+  NS_TEXTURE_DEPTH_TOLERANCE NS_TEXTURE_PADDING NS_TEXTURE_OVERWRITE
 do
   [[ -n "${!name:-}" ]] && COMMON+=( -e "$name=${!name}" )
 done
 
 case "$CMD" in
-  help|-h|--help|check|status|source|semantic-cloud|layout|object-mesh|fix-perms|shell|bash) GPU_ARGS=() ;;
+  help|-h|--help|check|status|source|semantic-cloud|layout|object-mesh|texture|fix-perms|shell|bash) GPU_ARGS=() ;;
   *) GPU_ARGS=(--gpus all) ;;
 esac
 

@@ -10,7 +10,8 @@ ENV PYTHONUNBUFFERED=1
 # the already validated NextGen image.
 RUN python -m pip install --no-cache-dir \
     transformers==4.56.2 \
-    accelerate==1.10.1
+    accelerate==1.10.1 \
+    xatlas==0.0.11
 
 COPY semantic/scripts /opt/namma-semantic/scripts
 COPY semantic/config /opt/namma-semantic/config

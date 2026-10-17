@@ -41,6 +41,9 @@ def main() -> None:
         elif directory == "04_object_meshes" and (path / "summary.json").is_file():
             summary = json.loads((path / "summary.json").read_text())
             marker = "READY" if summary.get("complete") else "partial"
+        elif directory == "05_textures" and (path / "summary.json").is_file():
+            summary = json.loads((path / "summary.json").read_text())
+            marker = "READY" if summary.get("complete") else "partial"
         else:
             marker = "READY" if path.exists() and any(path.iterdir()) else "pending"
         print(f"[{marker:7}] {directory:20} {description}")

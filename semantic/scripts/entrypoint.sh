@@ -18,7 +18,7 @@ Commands:
   semantic-cloud <scene>        Fuse Stage-1 masks into BA-aligned 3D
   layout <scene>                Fit floor/wall/ceiling/pillar geometry
   object-mesh <scene>           Per-instance observed-surface TSDF meshes
-  texture <scene>               Bake observed RGB onto meshes           [planned]
+  texture <scene>               UV unwrap + bake observed RGB textures
   scene <scene>                 Assemble GLB/USD + scene graph          [planned]
   viewer <scene>                First-person scene package              [planned]
   pipeline <scene>              Full semantic extension                 [planned]
@@ -77,6 +77,18 @@ Useful Stage-4 environment variables:
   NS_MESH_MIN_MASK_PIXELS
   NS_MESH_DUPLICATE_OVERLAP
   NS_MESH_OVERWRITE=1
+
+Texture options:
+  --overwrite                   Replace an existing 05_textures stage
+
+Useful Stage-5 environment variables:
+  NS_TEXTURE_RESOLUTION
+  NS_ARCH_TEXTURE_RESOLUTION
+  NS_TEXTURE_MIN_INCIDENCE
+  NS_TEXTURE_MIN_AREA
+  NS_TEXTURE_DEPTH_TOLERANCE
+  NS_TEXTURE_PADDING
+  NS_TEXTURE_OVERWRITE=1
 EOF
 }
 
@@ -118,7 +130,11 @@ case "${1:-help}" in
     shift
     exec python /opt/namma-semantic/scripts/mesh_objects.py "$@"
     ;;
-  texture|scene|viewer|pipeline)
+  texture)
+    shift
+    exec python /opt/namma-semantic/scripts/bake_textures.py "$@"
+    ;;
+  scene|viewer|pipeline)
     not_implemented "$1"
     ;;
   fix-perms)

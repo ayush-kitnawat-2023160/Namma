@@ -441,6 +441,102 @@ Every object metadata record explicitly states that its geometry comes from
 observed masked VGGT depth fused with BA poses and that unseen-surface
 completion is `none`.
 
+## Stage 5: UV texture baking
+
+Stage 5 turns the explicit Stage-3/4 geometry into conventional textured assets.
+It performs a real UV unwrap with `xatlas`; it does not merely keep the TSDF
+vertex colors.
+
+```text
+clean architecture meshes + observed object meshes
+                 |
+                 v
+             xatlas UV unwrap
+                 |
+                 v
+       candidate BA source views
+                 |
+        +--------+---------+
+        |                  |
+        v                  v
+ semantic/instance      VGGT depth
+       mask            consistency
+        |                  |
+        +--------+---------+
+                 |
+                 v
+   best observed RGB view per face
+                 |
+                 v
+      barycentric atlas rasterization
+                 |
+                 v
+           seam padding
+                 |
+                 v
+          textured GLB mesh
+```
+
+For object meshes, candidate views come only from the Stage-4 object
+observations and the corresponding Stage-1 instance masks. For floor/wall/
+pillar/ceiling meshes, the Stage-1 structural semantic masks are used instead.
+Every face also has to agree with the decoded VGGT depth in the selected BA
+camera before source RGB is accepted. Faces that do not have a trustworthy
+source view retain the Stage-4 vertex color when available, or a neutral
+fallback for architecture.
+
+Default atlas sizes are 1024x1024 per object and 2048x2048 per architecture
+piece. These can be reduced for a quick test without changing code.
+
+Build the semantic image once after pulling this stage because it adds the
+precompiled `xatlas` Python wheel:
+
+```bash
+./build_semantic.sh
+./run_semantic.sh check
+```
+
+Run:
+
+```bash
+./run_semantic.sh texture advio_nextgen
+```
+
+For a lower-resolution validation run:
+
+```bash
+NS_TEXTURE_RESOLUTION=512 \
+NS_ARCH_TEXTURE_RESOLUTION=1024 \
+./run_semantic.sh texture advio_nextgen --overwrite
+```
+
+Outputs:
+
+```text
+05_textures/
+  architecture/
+    floor/
+      texture.png
+      textured_mesh.glb
+      metadata.json
+    wall_001/
+      ...
+  objects/
+    chair_001/
+      texture.png
+      textured_mesh.glb
+      metadata.json
+    ...
+  textured_scene_preview.glb
+  assets.json
+  summary.json
+```
+
+The summary reports the fraction of mesh faces that received trusted source
+RGB. This is an important quality-control number: a low value means we should
+tune view/depth tolerances before assembling the final scene, rather than
+silently painting unsupported geometry.
+
 ## Implementation order
 
 1. 2D segmentation: structural semantic masks + frame-local object masks. **Implemented.**

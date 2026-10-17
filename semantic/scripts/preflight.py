@@ -17,6 +17,7 @@ MODULES = [
     "networkx",
     "scipy",
     "plyfile",
+    "xatlas",
     "transformers",
     "accelerate",
 ]

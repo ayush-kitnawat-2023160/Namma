@@ -87,6 +87,21 @@ meshing:
   max_mesh_triangles: 150000
   collision_max_triangles: 5000
 
+texturing:
+  object_texture_resolution: 1024
+  architecture_texture_resolution: 2048
+  min_incidence: 0.12
+  min_projected_area: 2.0
+  depth_tolerance_abs: 0.10
+  depth_tolerance_rel: 0.05
+  architecture_depth_tolerance_abs: 0.16
+  architecture_depth_tolerance_rel: 0.08
+  atlas_padding: 6
+  fallback_color: [160, 160, 160]
+  roughness_factor: 0.85
+  max_object_views: 120
+  max_architecture_views: 120
+
 export:
   primary_format: glb
   keep_individual_objects: true
