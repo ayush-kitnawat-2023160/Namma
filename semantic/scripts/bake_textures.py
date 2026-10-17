@@ -65,11 +65,22 @@ def project_points(points: np.ndarray, image, width: int, height: int):
     camera_xyz = points.astype(np.float64) @ R.T + t
     z = camera_xyz[:, 2]
     fx, fy, cx, cy = pinhole_params(image.camera, width, height)
-    uv = np.empty((len(points), 2), dtype=np.float64)
-    uv[:, 0] = fx * camera_xyz[:, 0] / np.maximum(z, 1e-12) + cx
-    uv[:, 1] = fy * camera_xyz[:, 1] / np.maximum(z, 1e-12) + cy
+    uv = np.full((len(points), 2), np.nan, dtype=np.float64)
+    projectable = (
+        np.isfinite(camera_xyz).all(axis=1)
+        & np.isfinite(z)
+        & (z > 1e-6)
+    )
+    if np.any(projectable):
+        uv[projectable, 0] = (
+            fx * camera_xyz[projectable, 0] / z[projectable] + cx
+        )
+        uv[projectable, 1] = (
+            fy * camera_xyz[projectable, 1] / z[projectable] + cy
+        )
     valid = (
-        (z > 1e-6)
+        projectable
+        & np.isfinite(uv).all(axis=1)
         & (uv[:, 0] >= 0)
         & (uv[:, 0] <= width - 1)
         & (uv[:, 1] >= 0)
@@ -92,11 +103,20 @@ def decode_depth(path: Path, encode_scale: float, metric_scale: float) -> np.nda
 
 
 def sample_depth(depth: np.ndarray, uv: np.ndarray, image_width: int, image_height: int) -> np.ndarray:
-    x = np.rint(uv[:, 0] * depth.shape[1] / max(1, image_width)).astype(np.int32)
-    y = np.rint(uv[:, 1] * depth.shape[0] / max(1, image_height)).astype(np.int32)
+    output = np.zeros(len(uv), dtype=depth.dtype)
+    finite = np.isfinite(uv).all(axis=1)
+    if not np.any(finite):
+        return output
+    x = np.rint(
+        uv[finite, 0] * depth.shape[1] / max(1, image_width)
+    ).astype(np.int32)
+    y = np.rint(
+        uv[finite, 1] * depth.shape[0] / max(1, image_height)
+    ).astype(np.int32)
     x = np.clip(x, 0, depth.shape[1] - 1)
     y = np.clip(y, 0, depth.shape[0] - 1)
-    return depth[y, x]
+    output[finite] = depth[y, x]
+    return output
 
 
 def triangle_area_2d(triangles: np.ndarray) -> np.ndarray:
@@ -212,9 +232,19 @@ def choose_source_views(
                     (width, height),
                     interpolation=cv2.INTER_NEAREST,
                 ) > 0
-            x = np.rint(center_uv[:, 0]).astype(np.int32)
-            y = np.rint(center_uv[:, 1]).astype(np.int32)
-            inside = center_valid & (x >= 0) & (x < width) & (y >= 0) & (y < height)
+            finite_centers = center_valid & np.isfinite(center_uv).all(axis=1)
+            x = np.zeros(face_count, dtype=np.int32)
+            y = np.zeros(face_count, dtype=np.int32)
+            if np.any(finite_centers):
+                x[finite_centers] = np.rint(center_uv[finite_centers, 0]).astype(np.int32)
+                y[finite_centers] = np.rint(center_uv[finite_centers, 1]).astype(np.int32)
+            inside = (
+                finite_centers
+                & (x >= 0)
+                & (x < width)
+                & (y >= 0)
+                & (y < height)
+            )
             mask_ok[:] = False
             ids = np.flatnonzero(inside)
             mask_ok[ids] = mask[y[ids], x[ids]]
@@ -284,16 +314,39 @@ def unwrap_mesh(mesh: trimesh.Trimesh):
 
 
 def sample_bilinear(image: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    map_x = x.astype(np.float32).reshape(-1, 1)
-    map_y = y.astype(np.float32).reshape(-1, 1)
-    sampled = cv2.remap(
-        image,
-        map_x,
-        map_y,
-        interpolation=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_REFLECT_101,
-    )
-    return sampled.reshape(-1, 3)
+    """Vectorized bilinear sampling without OpenCV's SHRT_MAX map limit.
+
+    cv2.remap rejects a sampling map when either map dimension reaches 32767.
+    Large atlas triangles can easily generate more than that many texels in a
+    single call, even though the source RGB image itself is small. Sampling
+    directly with NumPy removes that artificial restriction.
+    """
+    x = np.asarray(x, dtype=np.float32).reshape(-1)
+    y = np.asarray(y, dtype=np.float32).reshape(-1)
+    output = np.zeros((len(x), 3), dtype=np.uint8)
+    finite = np.isfinite(x) & np.isfinite(y)
+    if not np.any(finite):
+        return output
+
+    height, width = image.shape[:2]
+    xf = np.clip(x[finite], 0.0, max(0.0, width - 1.0))
+    yf = np.clip(y[finite], 0.0, max(0.0, height - 1.0))
+    x0 = np.floor(xf).astype(np.int32)
+    y0 = np.floor(yf).astype(np.int32)
+    x1 = np.minimum(x0 + 1, width - 1)
+    y1 = np.minimum(y0 + 1, height - 1)
+    wx = (xf - x0).astype(np.float32)
+    wy = (yf - y0).astype(np.float32)
+
+    c00 = image[y0, x0].astype(np.float32)
+    c10 = image[y0, x1].astype(np.float32)
+    c01 = image[y1, x0].astype(np.float32)
+    c11 = image[y1, x1].astype(np.float32)
+    top = c00 * (1.0 - wx[:, None]) + c10 * wx[:, None]
+    bottom = c01 * (1.0 - wx[:, None]) + c11 * wx[:, None]
+    sampled = top * (1.0 - wy[:, None]) + bottom * wy[:, None]
+    output[finite] = np.clip(sampled, 0, 255).astype(np.uint8)
+    return output
 
 
 def rasterize_triangle(
