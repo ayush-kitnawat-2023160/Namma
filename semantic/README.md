@@ -367,6 +367,80 @@ Outputs:
 conventional viewer/engine. At this stage it contains only observed/fitted
 architecture; unseen ceilings or walls are deliberately not synthesized.
 
+## Stage 4: observed object meshes
+
+Stage 4 reconstructs each persistent object from the **masked VGGT depth
+observations that actually saw it**. It does not run Poisson completion and does
+not close unseen backsides.
+
+```text
+Stage-2 persistent object track
+        |
+        +--> contributing frame/local instance IDs
+        |       |
+        |       +--> Stage-1 SAM2 masks
+        |
+        +--> decoded VGGT inverse depth
+        +--> VGGT depth confidence
+        +--> global-BA camera poses
+        |
+        v
+confidence-filtered masked RGB-D observations
+        |
+        v
+bounded per-object Uniform TSDF
+        |
+        v
+observed zero-crossing mesh
+        |
+        v
+cleanup + small-component removal + optional decimation
+```
+
+The stored depth PNGs are decoded with `inverse_depth_encode_scale` from the
+VGGT summary and multiplied by the VGGT->COLMAP Sim(3) scale before they are
+integrated with the BA cameras. Object volumes are bounded from the Stage-2 3D
+track boxes and adapt their resolution up to a configured maximum, which keeps
+memory bounded while preserving detail.
+
+Before meshing, only very strong duplicate Stage-2 tracks are consolidated.
+Tracks with any shared source frame are a hard cannot-link, and non-overlapping
+tracks need high shared 3D support plus centroid consistency to merge. This is
+deliberately conservative: leaving a duplicate is preferable to combining two
+physical chairs.
+
+Run:
+
+```bash
+./run_semantic.sh object-mesh advio_nextgen
+```
+
+Rerun after tuning:
+
+```bash
+./run_semantic.sh object-mesh advio_nextgen --overwrite
+```
+
+Outputs:
+
+```text
+04_object_meshes/
+  objects/
+    chair_001/
+      observed_mesh.ply
+      observed_mesh.glb
+      metadata.json
+    table_001/
+      ...
+  objects_preview.glb
+  objects.json
+  summary.json
+```
+
+Every object metadata record explicitly states that its geometry comes from
+observed masked VGGT depth fused with BA poses and that unseen-surface
+completion is `none`.
+
 ## Implementation order
 
 1. 2D segmentation: structural semantic masks + frame-local object masks. **Implemented.**

@@ -17,7 +17,7 @@ Commands:
   segment <scene> [options]     2D stuff + object-instance masks
   semantic-cloud <scene>        Fuse Stage-1 masks into BA-aligned 3D
   layout <scene>                Fit floor/wall/ceiling/pillar geometry
-  object-mesh <scene>           Per-instance masked TSDF meshes         [planned]
+  object-mesh <scene>           Per-instance observed-surface TSDF meshes
   texture <scene>               Bake observed RGB onto meshes           [planned]
   scene <scene>                 Assemble GLB/USD + scene graph          [planned]
   viewer <scene>                First-person scene package              [planned]
@@ -65,6 +65,18 @@ Useful Stage-3 environment variables:
   NS_LAYOUT_MIN_POINTS
   NS_LAYOUT_MAX_WALLS
   NS_LAYOUT_OVERWRITE=1
+
+Object-mesh options:
+  --overwrite                   Replace an existing 04_object_meshes stage
+
+Useful Stage-4 environment variables:
+  NS_TSDF_VOXEL_SIZE
+  NS_TSDF_TRUNCATION
+  NS_MESH_CONFIDENCE_PERCENTILE
+  NS_MESH_MIN_VIEWS
+  NS_MESH_MIN_MASK_PIXELS
+  NS_MESH_DUPLICATE_OVERLAP
+  NS_MESH_OVERWRITE=1
 EOF
 }
 
@@ -102,7 +114,11 @@ case "${1:-help}" in
     shift
     exec python /opt/namma-semantic/scripts/fit_layout.py "$@"
     ;;
-  object-mesh|texture|scene|viewer|pipeline)
+  object-mesh)
+    shift
+    exec python /opt/namma-semantic/scripts/mesh_objects.py "$@"
+    ;;
+  texture|scene|viewer|pipeline)
     not_implemented "$1"
     ;;
   fix-perms)

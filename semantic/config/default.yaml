@@ -72,6 +72,18 @@ layout:
 meshing:
   tsdf_voxel_size: 0.01
   tsdf_truncation: 0.04
+  confidence_percentile: 20.0
+  min_views: 2
+  min_mask_pixels: 100
+  depth_trunc_quantile: 0.995
+  max_volume_resolution: 192
+  volume_margin_scale: 0.15
+  volume_margin_min: 0.08
+  duplicate_overlap_threshold: 0.60
+  duplicate_voxel_size: 0.01
+  duplicate_centroid_distance: 0.50
+  component_min_triangles: 30
+  component_min_fraction: 0.005
   max_mesh_triangles: 150000
   collision_max_triangles: 5000
 
