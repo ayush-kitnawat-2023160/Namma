@@ -16,7 +16,7 @@ Commands:
   status <scene>                Show semantic-stage status for a scene
   segment <scene> [options]     2D stuff + object-instance masks
   semantic-cloud <scene>        Fuse Stage-1 masks into BA-aligned 3D
-  layout <scene>                Fit floor/wall/ceiling geometry         [planned]
+  layout <scene>                Fit floor/wall/ceiling/pillar geometry
   object-mesh <scene>           Per-instance masked TSDF meshes         [planned]
   texture <scene>               Bake observed RGB onto meshes           [planned]
   scene <scene>                 Assemble GLB/USD + scene graph          [planned]
@@ -56,6 +56,15 @@ Useful Stage-2 environment variables:
   NS_FUSION_MIN_INSTANCE_POINTS
   NS_FUSION_MIN_OBJECT_POINT_VOTES
   NS_FUSION_OVERWRITE=1
+
+Layout options:
+  --overwrite                   Replace an existing 03_layout stage
+
+Useful Stage-3 environment variables:
+  NS_LAYOUT_DISTANCE_THRESHOLD
+  NS_LAYOUT_MIN_POINTS
+  NS_LAYOUT_MAX_WALLS
+  NS_LAYOUT_OVERWRITE=1
 EOF
 }
 
@@ -89,7 +98,11 @@ case "${1:-help}" in
     shift
     exec python /opt/namma-semantic/scripts/fuse_semantic_cloud.py "$@"
     ;;
-  layout|object-mesh|texture|scene|viewer|pipeline)
+  layout)
+    shift
+    exec python /opt/namma-semantic/scripts/fit_layout.py "$@"
+    ;;
+  object-mesh|texture|scene|viewer|pipeline)
     not_implemented "$1"
     ;;
   fix-perms)

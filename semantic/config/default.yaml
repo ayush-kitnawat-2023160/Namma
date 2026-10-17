@@ -60,6 +60,14 @@ layout:
   plane_distance_threshold: 0.03
   plane_min_points: 2500
   simplify_tolerance: 0.03
+  ransac_iterations: 2500
+  max_wall_planes: 8
+  wall_vertical_dot_max: 0.35
+  ceiling_parallel_dot_min: 0.85
+  hull_clip_quantile: 0.995
+  pillar_min_points: 300
+  pillar_cluster_eps_scale: 8.0
+  pillar_dbscan_min_samples: 10
 
 meshing:
   tsdf_voxel_size: 0.01

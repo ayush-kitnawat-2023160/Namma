@@ -312,6 +312,61 @@ visibility count and the source dense-point index as PLY vertex properties.
 This lets later layout/meshing stages remain traceable back to the original
 aligned VGGT geometry.
 
+## Stage 3: explicit room layout
+
+Stage 3 converts the structural class clouds into clean simulator-friendly
+geometry without inventing unsupported surfaces:
+
+```text
+floor.ply   -> dominant RANSAC plane -> convex floor polygon
+wall.ply    -> iterative vertical RANSAC planes -> wall polygons
+ceiling.ply -> parallel plane only when enough observed support exists
+pillar.ply  -> DBSCAN clusters -> oriented box proxies
+```
+
+The floor normal is oriented toward the median BA camera position and becomes
+the scene `up_vector`. Wall candidates are retained only when their normals are
+approximately perpendicular to that up direction. A tiny fraction of extreme
+coplanar support is clipped before polygonization so isolated semantic outliers
+cannot explode a room boundary.
+
+Run:
+
+```bash
+./run_semantic.sh layout advio_nextgen
+```
+
+Rerun after tuning with:
+
+```bash
+./run_semantic.sh layout advio_nextgen --overwrite
+```
+
+Outputs:
+
+```text
+03_layout/
+  meshes/
+    floor.ply
+    wall_001.ply
+    wall_002.ply
+    ...
+    ceiling.ply        # only when actually observed
+    pillar_001.ply
+    ...
+  support/
+    floor_inliers.ply
+    wall_001_inliers.ply
+    ...
+  room_shell.glb
+  layout.json
+  summary.json
+```
+
+`room_shell.glb` is the first explicit scene asset suitable for loading into a
+conventional viewer/engine. At this stage it contains only observed/fitted
+architecture; unseen ceilings or walls are deliberately not synthesized.
+
 ## Implementation order
 
 1. 2D segmentation: structural semantic masks + frame-local object masks. **Implemented.**
