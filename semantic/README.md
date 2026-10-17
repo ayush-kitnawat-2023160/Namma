@@ -537,6 +537,106 @@ RGB. This is an important quality-control number: a low value means we should
 tune view/depth tolerances before assembling the final scene, rather than
 silently painting unsupported geometry.
 
+## Stage 6: final digital-twin scene
+
+Stage 6 assembles the fitted architecture and textured object assets into one
+explicit digital-twin package. All visual meshes remain in the same global BA
+coordinate frame, so no per-object alignment is needed here.
+
+```text
+05_textures textured architecture + objects
+                 |
+                 +----> visual scene ----------------> digital_twin.glb
+                 |
+03_layout fitted architecture
+                 +----> static collision surfaces ---+
+                 |                                    |
+04_object_meshes observed objects                     |
+                 +----> convex collision proxies -----+--> collision_scene.glb
+                 |
+03_layout metadata + Stage-4/5 provenance
+                 |
+                 +----> scene_graph.json
+                 |
+NextGen BA cameras
+                 +----> camera_trajectory.json
+```
+
+Architecture collision uses the clean Stage-3 fitted floor/wall/pillar meshes.
+Object collision uses conservative convex hulls of the observed Stage-4 object
+geometry. If a convex hull is degenerate, the exporter falls back to an
+oriented box. This is intended for stable static first-person collision; it is
+not yet articulated manipulation-grade collision decomposition.
+
+Run:
+
+```bash
+./run_semantic.sh scene advio_nextgen
+```
+
+Rerun:
+
+```bash
+./run_semantic.sh scene advio_nextgen --overwrite
+```
+
+Outputs:
+
+```text
+06_scene/
+  digital_twin.glb
+  collision_scene.glb
+  collisions/
+    floor.glb
+    wall_001.glb
+    pillar_001.glb
+    chair_001.glb
+    ...
+  camera_trajectory.json
+  scene_graph.json
+  summary.json
+```
+
+`scene_graph.json` contains one node per semantic asset with its class, visual
+mesh, collision mesh, bounds, texture coverage, provenance, source tracks/views
+when applicable, and an identity transform because geometry is already stored
+in global coordinates.
+
+### Metric scale is intentionally explicit
+
+The monocular reconstruction does **not** guarantee metres. By default Stage 6
+therefore writes:
+
+```json
+{
+  "kind": "reconstruction_units",
+  "meters_per_unit": null,
+  "metric_calibrated": false
+}
+```
+
+When one real-world distance is known, compute
+
+```text
+meters_per_unit = real_distance_metres / reconstructed_distance_units
+```
+
+and rerun only Stage 6:
+
+```bash
+NS_SCENE_METERS_PER_UNIT=0.73 \
+./run_semantic.sh scene advio_nextgen --overwrite
+```
+
+Stage 6 then applies the uniform scale to the visual geometry, collision
+geometry, and camera trajectory together and records that metric calibration in
+the scene graph. The example scalar above is illustrative only; it must come
+from a real measurement for the actual scene.
+
+USD export is deliberately deferred. GLB is the validated primary asset for
+the current viewer/simulation MVP; a later engine-specific exporter can consume
+the same scene graph without changing the reconstruction stages.
+
 ## Implementation order
 
 1. 2D segmentation: structural semantic masks + frame-local object masks. **Implemented.**

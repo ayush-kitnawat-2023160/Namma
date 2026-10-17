@@ -19,7 +19,7 @@ Commands:
   layout <scene>                Fit floor/wall/ceiling/pillar geometry
   object-mesh <scene>           Per-instance observed-surface TSDF meshes
   texture <scene>               UV unwrap + bake observed RGB textures
-  scene <scene>                 Assemble GLB/USD + scene graph          [planned]
+  scene <scene>                 Assemble final GLB + scene graph + collisions
   viewer <scene>                First-person scene package              [planned]
   pipeline <scene>              Full semantic extension                 [planned]
   fix-perms                     Fix host ownership of semantic outputs
@@ -89,6 +89,14 @@ Useful Stage-5 environment variables:
   NS_TEXTURE_DEPTH_TOLERANCE
   NS_TEXTURE_PADDING
   NS_TEXTURE_OVERWRITE=1
+
+Scene options:
+  --overwrite                   Replace an existing 06_scene stage
+
+Useful Stage-6 environment variables:
+  NS_SCENE_METERS_PER_UNIT      Optional metric calibration scalar
+  NS_SCENE_COLLISION_MAX_TRIANGLES
+  NS_SCENE_OVERWRITE=1
 EOF
 }
 
@@ -134,7 +142,11 @@ case "${1:-help}" in
     shift
     exec python /opt/namma-semantic/scripts/bake_textures.py "$@"
     ;;
-  scene|viewer|pipeline)
+  scene)
+    shift
+    exec python /opt/namma-semantic/scripts/assemble_scene.py "$@"
+    ;;
+  viewer|pipeline)
     not_implemented "$1"
     ;;
   fix-perms)

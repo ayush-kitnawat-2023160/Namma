@@ -14,7 +14,7 @@ STAGES = [
     ("03_layout", "room shell / planes"),
     ("04_object_meshes", "per-object meshes"),
     ("05_textures", "texture baking"),
-    ("06_scene", "GLB/USD scene"),
+    ("06_scene", "GLB scene / graph / collision"),
     ("07_viewer", "first-person package"),
 ]
 
@@ -42,6 +42,9 @@ def main() -> None:
             summary = json.loads((path / "summary.json").read_text())
             marker = "READY" if summary.get("complete") else "partial"
         elif directory == "05_textures" and (path / "summary.json").is_file():
+            summary = json.loads((path / "summary.json").read_text())
+            marker = "READY" if summary.get("complete") else "partial"
+        elif directory == "06_scene" and (path / "summary.json").is_file():
             summary = json.loads((path / "summary.json").read_text())
             marker = "READY" if summary.get("complete") else "partial"
         else:

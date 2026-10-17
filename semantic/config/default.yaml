@@ -106,3 +106,10 @@ export:
   primary_format: glb
   keep_individual_objects: true
   write_scene_graph_json: true
+  # Monocular reconstruction scale is arbitrary until one real-world distance
+  # is supplied. Leave null by default instead of silently claiming metres.
+  meters_per_unit: null
+  collision_max_triangles: 5000
+  object_collision: convex_hull
+  architecture_collision: source_mesh
+  write_camera_trajectory: true
