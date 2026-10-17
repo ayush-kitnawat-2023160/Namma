@@ -7,7 +7,6 @@ import os
 import shutil
 from pathlib import Path
 
-import cv2
 import numpy as np
 import open3d as o3d
 import pycolmap
@@ -84,8 +83,6 @@ def polygon_mesh_from_plane(
     points: np.ndarray,
     plane: np.ndarray,
     clip_quantile: float,
-    simplify_tolerance: float = 0.0,
-    max_boundary_vertices: int = 0,
 ) -> tuple[trimesh.Trimesh, dict]:
     normal = plane[:3]
     centroid = points.mean(axis=0)
@@ -104,28 +101,6 @@ def polygon_mesh_from_plane(
 
     hull = ConvexHull(projected)
     polygon_2d = projected[hull.vertices]
-    if simplify_tolerance > 0 and len(polygon_2d) > 3:
-        contour = polygon_2d.astype(np.float32).reshape(-1, 1, 2)
-        simplified = cv2.approxPolyDP(
-            contour,
-            epsilon=float(simplify_tolerance),
-            closed=True,
-        ).reshape(-1, 2)
-        if len(simplified) >= 3:
-            polygon_2d = simplified.astype(np.float64)
-    if max_boundary_vertices > 0 and len(polygon_2d) > max_boundary_vertices:
-        # Increase epsilon gradually until the observed hull is represented by
-        # a compact polygon rather than a saw-tooth boundary.
-        perimeter = float(cv2.arcLength(polygon_2d.astype(np.float32).reshape(-1, 1, 2), True))
-        for fraction in np.linspace(0.002, 0.08, 40):
-            simplified = cv2.approxPolyDP(
-                polygon_2d.astype(np.float32).reshape(-1, 1, 2),
-                epsilon=perimeter * float(fraction),
-                closed=True,
-            ).reshape(-1, 2)
-            if 3 <= len(simplified) <= max_boundary_vertices:
-                polygon_2d = simplified.astype(np.float64)
-                break
     vertices = centroid + polygon_2d[:, :1] * u + polygon_2d[:, 1:] * v
     faces = []
     for index in range(1, len(vertices) - 1):
@@ -139,47 +114,6 @@ def polygon_mesh_from_plane(
         "centroid": centroid.tolist(),
         "hull_vertices": vertices.tolist(),
         "area": float(mesh.area),
-    }
-
-
-def rectangular_wall_mesh(
-    points: np.ndarray,
-    plane: np.ndarray,
-    up: np.ndarray,
-    extent_quantile: float,
-) -> tuple[trimesh.Trimesh, dict]:
-    """Regularize an observed vertical wall plane into one clean rectangle.
-
-    The rectangle is bounded by robust quantiles of the actual inlier support;
-    this fills small observation holes but does not extrapolate beyond the
-    observed wall extent.
-    """
-    normal = plane[:3] / np.linalg.norm(plane[:3])
-    vertical = up - np.dot(up, normal) * normal
-    vertical /= max(np.linalg.norm(vertical), 1e-12)
-    horizontal = np.cross(vertical, normal)
-    horizontal /= max(np.linalg.norm(horizontal), 1e-12)
-    centroid = points.mean(axis=0)
-    centroid = centroid - (np.dot(normal, centroid) + plane[3]) * normal
-    rel = points - centroid
-    x = rel @ horizontal
-    y = rel @ vertical
-    q = float(np.clip(extent_quantile, 0.0, 0.2))
-    x0, x1 = np.quantile(x, [q, 1.0 - q])
-    y0, y1 = np.quantile(y, [q, 1.0 - q])
-    corners_2d = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float64)
-    vertices = (
-        centroid
-        + corners_2d[:, :1] * horizontal
-        + corners_2d[:, 1:] * vertical
-    )
-    faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
-    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-    return mesh, {
-        "centroid": centroid.tolist(),
-        "hull_vertices": vertices.tolist(),
-        "area": float(mesh.area),
-        "regularized_rectangle": True,
     }
 
 
@@ -197,8 +131,6 @@ def iterative_wall_planes(
     max_planes: int,
     vertical_dot_max: float,
     clip_quantile: float,
-    regularize_rectangles: bool,
-    wall_extent_quantile: float,
 ) -> list[dict]:
     remaining = points.copy()
     outputs: list[dict] = []
@@ -216,15 +148,7 @@ def iterative_wall_planes(
         alignment = abs(float(np.dot(plane[:3], up)))
         if alignment > vertical_dot_max:
             continue
-        if regularize_rectangles:
-            mesh, geometry = rectangular_wall_mesh(
-                support,
-                plane,
-                up,
-                wall_extent_quantile,
-            )
-        else:
-            mesh, geometry = polygon_mesh_from_plane(support, plane, clip_quantile)
+        mesh, geometry = polygon_mesh_from_plane(support, plane, clip_quantile)
         outputs.append(
             {
                 "plane": plane,
@@ -307,10 +231,6 @@ def main() -> None:
     vertical_dot_max = float(config["wall_vertical_dot_max"])
     ceiling_parallel_dot_min = float(config["ceiling_parallel_dot_min"])
     clip_quantile = float(config["hull_clip_quantile"])
-    simplify_tolerance = float(config["simplify_tolerance"])
-    wall_extent_quantile = float(config["wall_extent_quantile"])
-    wall_regularize_rectangles = bool(config["wall_regularize_rectangles"])
-    floor_max_boundary_vertices = int(config["floor_max_boundary_vertices"])
     pillar_min_points = int(config["pillar_min_points"])
     pillar_eps_scale = float(config["pillar_cluster_eps_scale"])
     pillar_dbscan_min_samples = int(config["pillar_dbscan_min_samples"])
@@ -357,11 +277,7 @@ def main() -> None:
         floor_plane *= -1.0
     up = floor_plane[:3]
     floor_mesh, floor_geometry = polygon_mesh_from_plane(
-        floor_support,
-        floor_plane,
-        clip_quantile,
-        simplify_tolerance=simplify_tolerance,
-        max_boundary_vertices=floor_max_boundary_vertices,
+        floor_support, floor_plane, clip_quantile
     )
     export_mesh(floor_mesh, meshes_dir / "floor.ply")
     o3d.io.write_point_cloud(
@@ -378,8 +294,6 @@ def main() -> None:
         max_walls,
         vertical_dot_max,
         clip_quantile,
-        wall_regularize_rectangles,
-        wall_extent_quantile,
     ) if len(wall_points) >= min_points else []
     for index, wall in enumerate(walls, start=1):
         export_mesh(wall["mesh"], meshes_dir / f"wall_{index:03d}.ply")
@@ -397,13 +311,7 @@ def main() -> None:
             support = ceiling_points[inliers]
             if np.dot(candidate[:3], up) > 0:
                 candidate *= -1.0
-            ceiling_mesh, geometry = polygon_mesh_from_plane(
-                support,
-                candidate,
-                clip_quantile,
-                simplify_tolerance=simplify_tolerance,
-                max_boundary_vertices=floor_max_boundary_vertices,
-            )
+            ceiling_mesh, geometry = polygon_mesh_from_plane(support, candidate, clip_quantile)
             export_mesh(ceiling_mesh, meshes_dir / "ceiling.ply")
             ceiling_record = {
                 "plane": candidate.tolist(),
@@ -488,10 +396,6 @@ def main() -> None:
             "max_wall_planes": max_walls,
             "wall_vertical_dot_max": vertical_dot_max,
             "ceiling_parallel_dot_min": ceiling_parallel_dot_min,
-            "simplify_tolerance": simplify_tolerance,
-            "wall_regularize_rectangles": wall_regularize_rectangles,
-            "wall_extent_quantile": wall_extent_quantile,
-            "floor_max_boundary_vertices": floor_max_boundary_vertices,
         },
         "room_shell": str(output / "room_shell.glb"),
     }

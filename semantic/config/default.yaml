@@ -65,9 +65,6 @@ layout:
   wall_vertical_dot_max: 0.35
   ceiling_parallel_dot_min: 0.85
   hull_clip_quantile: 0.995
-  wall_extent_quantile: 0.01
-  wall_regularize_rectangles: true
-  floor_max_boundary_vertices: 12
   pillar_min_points: 300
   pillar_cluster_eps_scale: 8.0
   pillar_dbscan_min_samples: 10
@@ -82,16 +79,11 @@ meshing:
   max_volume_resolution: 192
   volume_margin_scale: 0.15
   volume_margin_min: 0.08
-  mask_erode_pixels: 1
-  bbox_filter_margin_scale: 0.20
-  bbox_filter_margin_min: 0.03
   duplicate_overlap_threshold: 0.60
   duplicate_voxel_size: 0.01
   duplicate_centroid_distance: 0.50
   component_min_triangles: 30
   component_min_fraction: 0.005
-  max_triangle_edge_voxels: 6.0
-  taubin_smoothing_iterations: 3
   max_mesh_triangles: 150000
   collision_max_triangles: 5000
 
@@ -109,7 +101,6 @@ texturing:
   roughness_factor: 0.85
   max_object_views: 120
   max_architecture_views: 120
-  architecture_coherent_views: 3
 
 export:
   primary_format: glb

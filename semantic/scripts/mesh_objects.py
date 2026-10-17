@@ -127,13 +127,6 @@ def consolidate_tracks(
 
 
 def camera_matrix(image, width: int, height: int) -> o3d.camera.PinholeCameraIntrinsic:
-    fx, fy, cx, cy = camera_intrinsic_values(image, width, height)
-    intrinsic = o3d.camera.PinholeCameraIntrinsic()
-    intrinsic.set_intrinsics(width, height, fx, fy, cx, cy)
-    return intrinsic
-
-
-def camera_intrinsic_values(image, width: int, height: int) -> tuple[float, float, float, float]:
     camera = image.camera
     params = np.asarray(camera.params, dtype=np.float64)
     model = str(camera.model_name)
@@ -146,12 +139,16 @@ def camera_intrinsic_values(image, width: int, height: int) -> tuple[float, floa
         raise RuntimeError(f"Stage 4 expects rectified PINHOLE input; got {model}")
     sx = width / float(camera.width)
     sy = height / float(camera.height)
-    return (
+    intrinsic = o3d.camera.PinholeCameraIntrinsic()
+    intrinsic.set_intrinsics(
+        width,
+        height,
         float(fx * sx),
         float(fy * sy),
         float(cx * sx),
         float(cy * sy),
     )
+    return intrinsic
 
 
 def camera_extrinsic(image) -> np.ndarray:
@@ -160,43 +157,6 @@ def camera_extrinsic(image) -> np.ndarray:
     extrinsic = np.eye(4, dtype=np.float64)
     extrinsic[:3, :4] = matrix
     return extrinsic
-
-
-def filter_depth_to_world_bbox(
-    depth: np.ndarray,
-    valid: np.ndarray,
-    image,
-    bbox_min: np.ndarray,
-    bbox_max: np.ndarray,
-    margin_scale: float,
-    margin_min: float,
-) -> np.ndarray:
-    """Reject masked depth samples that cannot belong to the 3D object track."""
-    ys, xs = np.nonzero(valid)
-    if len(xs) == 0:
-        return valid
-    z = depth[ys, xs].astype(np.float64)
-    fx, fy, cx, cy = camera_intrinsic_values(image, depth.shape[1], depth.shape[0])
-    camera_points = np.column_stack(
-        [
-            (xs.astype(np.float64) - cx) * z / fx,
-            (ys.astype(np.float64) - cy) * z / fy,
-            z,
-        ]
-    )
-    pose = np.asarray(image.cam_from_world().matrix(), dtype=np.float64)
-    R = pose[:, :3]
-    t = pose[:, 3]
-    world_points = (camera_points - t.reshape(1, 3)) @ R
-
-    extent = np.maximum(bbox_max - bbox_min, 1e-6)
-    margin = np.maximum(float(margin_min), extent * float(margin_scale))
-    lower = bbox_min - margin
-    upper = bbox_max + margin
-    inside = np.all((world_points >= lower) & (world_points <= upper), axis=1)
-    filtered = np.zeros_like(valid, dtype=bool)
-    filtered[ys[inside], xs[inside]] = True
-    return filtered
 
 
 def decode_depth(path: Path, encode_scale: float, metric_scale: float) -> np.ndarray:
@@ -254,26 +214,11 @@ def cleanup_mesh(
     min_triangles: int,
     min_fraction: float,
     max_triangles: int,
-    max_edge_length: float,
-    smoothing_iterations: int,
 ) -> tuple[o3d.geometry.TriangleMesh, dict]:
     mesh.remove_duplicated_vertices()
     mesh.remove_duplicated_triangles()
     mesh.remove_degenerate_triangles()
     mesh.remove_unreferenced_vertices()
-    removed_long_triangles = 0
-    if len(mesh.triangles) and max_edge_length > 0:
-        vertices = np.asarray(mesh.vertices)
-        triangles = np.asarray(mesh.triangles)
-        tri_vertices = vertices[triangles]
-        e01 = np.linalg.norm(tri_vertices[:, 0] - tri_vertices[:, 1], axis=1)
-        e12 = np.linalg.norm(tri_vertices[:, 1] - tri_vertices[:, 2], axis=1)
-        e20 = np.linalg.norm(tri_vertices[:, 2] - tri_vertices[:, 0], axis=1)
-        remove_long = np.maximum.reduce([e01, e12, e20]) > float(max_edge_length)
-        removed_long_triangles = int(np.count_nonzero(remove_long))
-        if removed_long_triangles:
-            mesh.remove_triangles_by_mask(remove_long)
-            mesh.remove_unreferenced_vertices()
     triangles_before = len(mesh.triangles)
     removed_components = 0
     if triangles_before:
@@ -292,11 +237,8 @@ def cleanup_mesh(
                 mesh.remove_unreferenced_vertices()
     if max_triangles > 0 and len(mesh.triangles) > max_triangles:
         mesh = mesh.simplify_quadric_decimation(target_number_of_triangles=int(max_triangles))
-    if smoothing_iterations > 0 and len(mesh.triangles):
-        mesh = mesh.filter_smooth_taubin(number_of_iterations=int(smoothing_iterations))
     mesh.compute_vertex_normals()
     return mesh, {
-        "removed_long_triangles": removed_long_triangles,
         "triangles_before_cleanup": int(triangles_before),
         "triangles_after_cleanup": int(len(mesh.triangles)),
         "vertices_after_cleanup": int(len(mesh.vertices)),
@@ -322,9 +264,6 @@ def integrate_object(
     max_volume_resolution: int,
     volume_margin_scale: float,
     volume_margin_min: float,
-    mask_erode_pixels: int,
-    bbox_filter_margin_scale: float,
-    bbox_filter_margin_min: float,
 ) -> tuple[o3d.geometry.TriangleMesh, dict]:
     extent = np.maximum(bbox_max - bbox_min, 1e-6)
     max_extent = float(np.max(extent))
@@ -364,15 +303,6 @@ def integrate_object(
         if mask is None:
             continue
         mask = cv2.resize(mask, (depth.shape[1], depth.shape[0]), interpolation=cv2.INTER_NEAREST) > 0
-        if mask_erode_pixels > 0 and np.count_nonzero(mask) >= min_mask_pixels * 2:
-            kernel_size = 2 * int(mask_erode_pixels) + 1
-            eroded = cv2.erode(
-                mask.astype(np.uint8),
-                np.ones((kernel_size, kernel_size), dtype=np.uint8),
-                iterations=1,
-            ) > 0
-            if np.count_nonzero(eroded) >= min_mask_pixels:
-                mask = eroded
         confidence = np.load(confidence_dir / f"{Path(image_name).stem}.npy").astype(np.float32)
         if confidence.shape != depth.shape:
             confidence = cv2.resize(
@@ -385,18 +315,6 @@ def integrate_object(
             continue
         threshold = float(np.percentile(confidence[candidate], confidence_percentile))
         valid = candidate & (confidence >= threshold)
-        camera = images_by_name.get(image_name)
-        if camera is None:
-            continue
-        valid = filter_depth_to_world_bbox(
-            depth,
-            valid,
-            camera,
-            bbox_min,
-            bbox_max,
-            bbox_filter_margin_scale,
-            bbox_filter_margin_min,
-        )
         if np.count_nonzero(valid) < min_mask_pixels:
             continue
         valid_depth_values.append(depth[valid])
@@ -431,6 +349,9 @@ def integrate_object(
             depth_trunc=depth_trunc,
             convert_rgb_to_intensity=False,
         )
+        camera = images_by_name.get(image_name)
+        if camera is None:
+            continue
         intrinsic = camera_matrix(camera, depth.shape[1], depth.shape[0])
         volume.integrate(rgbd, intrinsic, camera_extrinsic(camera))
         used.append(
@@ -552,9 +473,6 @@ def main() -> None:
             int(cfg["max_volume_resolution"]),
             float(cfg["volume_margin_scale"]),
             float(cfg["volume_margin_min"]),
-            int(cfg["mask_erode_pixels"]),
-            float(cfg["bbox_filter_margin_scale"]),
-            float(cfg["bbox_filter_margin_min"]),
         )
         if integration["views_used"] < min_views or len(mesh.triangles) == 0:
             results.append(
@@ -571,8 +489,6 @@ def main() -> None:
             int(cfg["component_min_triangles"]),
             float(cfg["component_min_fraction"]),
             max_mesh_triangles,
-            float(integration["effective_voxel_size"]) * float(cfg["max_triangle_edge_voxels"]),
-            int(cfg["taubin_smoothing_iterations"]),
         )
         if len(mesh.triangles) == 0:
             continue
@@ -626,11 +542,6 @@ def main() -> None:
             "confidence_percentile": confidence_percentile,
             "min_views": min_views,
             "min_mask_pixels": min_mask_pixels,
-            "mask_erode_pixels": int(cfg["mask_erode_pixels"]),
-            "bbox_filter_margin_scale": float(cfg["bbox_filter_margin_scale"]),
-            "bbox_filter_margin_min": float(cfg["bbox_filter_margin_min"]),
-            "max_triangle_edge_voxels": float(cfg["max_triangle_edge_voxels"]),
-            "taubin_smoothing_iterations": int(cfg["taubin_smoothing_iterations"]),
         },
         "depth_source": "decoded VGGT-Omega inverse-depth PNGs",
         "depth_to_ba_scale": metric_scale,

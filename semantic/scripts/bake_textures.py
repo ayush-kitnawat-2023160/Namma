@@ -197,7 +197,6 @@ def choose_source_views(
     min_projected_area: float,
     depth_tolerance_abs: float,
     depth_tolerance_rel: float,
-    coherent_max_views: int = 0,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     vertices = np.asarray(mesh.vertices, dtype=np.float64)
     faces = np.asarray(mesh.faces, dtype=np.int64)
@@ -209,9 +208,6 @@ def choose_source_views(
     best_source_uv = np.zeros((face_count, 3, 2), dtype=np.float32)
     assigned_per_view = Counter()
     view_stats = {}
-    coherent_candidates: list[np.ndarray | None] = [None] * len(image_names)
-    coherent_scores: list[np.ndarray | None] = [None] * len(image_names)
-    coherent_uvs: list[np.ndarray | None] = [None] * len(image_names)
 
     for view_index, image_name in enumerate(image_names):
         camera = images_by_name.get(image_name)
@@ -281,10 +277,6 @@ def choose_source_views(
             & (projected_area >= min_projected_area)
         )
         score = incidence * np.sqrt(np.maximum(projected_area, 0.0))
-        if coherent_max_views > 0:
-            coherent_candidates[view_index] = candidate.copy()
-            coherent_scores[view_index] = score.copy()
-            coherent_uvs[view_index] = tri_uv.astype(np.float32)
         update = candidate & (score > best_score)
         if np.any(update):
             best_score[update] = score[update]
@@ -297,46 +289,6 @@ def choose_source_views(
             "mask_faces": int(np.count_nonzero(mask_ok & tri_valid)),
         }
 
-    coherent_selected = []
-    if coherent_max_views > 0 and face_count > 0:
-        fallback_view = best_view.copy()
-        fallback_uv = best_source_uv.copy()
-        uncovered = np.ones(face_count, dtype=bool)
-        best_view[:] = -1
-        best_source_uv[:] = 0
-        remaining = set(range(len(image_names)))
-        for _ in range(int(coherent_max_views)):
-            winner = None
-            winner_utility = 0.0
-            for view_index in remaining:
-                candidate = coherent_candidates[view_index]
-                score = coherent_scores[view_index]
-                if candidate is None or score is None:
-                    continue
-                gain = candidate & uncovered
-                if not np.any(gain):
-                    continue
-                utility = float(np.sum(score[gain]))
-                if utility > winner_utility:
-                    winner = view_index
-                    winner_utility = utility
-            if winner is None:
-                break
-            candidate = coherent_candidates[winner]
-            gain = candidate & uncovered
-            best_view[gain] = winner
-            best_source_uv[gain] = coherent_uvs[winner][gain]
-            uncovered[gain] = False
-            coherent_selected.append(image_names[winner])
-            remaining.remove(winner)
-
-        # Preserve the old high-coverage behavior only for faces the coherent
-        # source set cannot explain. The majority of a wall/floor therefore
-        # comes from a tiny number of consistent source images.
-        fallback = uncovered & (fallback_view >= 0)
-        best_view[fallback] = fallback_view[fallback]
-        best_source_uv[fallback] = fallback_uv[fallback]
-
     for view_index, name in enumerate(image_names):
         assigned_per_view[name] = int(np.count_nonzero(best_view == view_index))
     stats = {
@@ -346,8 +298,6 @@ def choose_source_views(
         "assigned_fraction": float(np.count_nonzero(best_view >= 0) / max(1, face_count)),
         "assigned_per_view": dict(assigned_per_view),
         "view_stats": view_stats,
-        "coherent_selected_views": coherent_selected,
-        "coherent_max_views": int(coherent_max_views),
     }
     return best_view, best_source_uv, stats
 
@@ -475,7 +425,6 @@ def bake_mesh(
     atlas_padding: int,
     fallback_color: tuple[int, int, int],
     roughness_factor: float,
-    coherent_max_views: int = 0,
 ) -> tuple[trimesh.Trimesh, np.ndarray, dict]:
     mesh = mesh.copy()
     if not mesh.is_empty:
@@ -493,7 +442,6 @@ def bake_mesh(
         min_projected_area,
         depth_tolerance_abs,
         depth_tolerance_rel,
-        coherent_max_views=coherent_max_views,
     )
     vmapping, faces_uv, uvs = unwrap_mesh(mesh)
     new_vertices = np.asarray(mesh.vertices)[vmapping]
@@ -672,7 +620,6 @@ def main() -> None:
             padding,
             tuple(int(v) for v in cfg["fallback_color"]),
             float(cfg["roughness_factor"]),
-            coherent_max_views=int(cfg["architecture_coherent_views"]),
         )
         record = {
             "asset_id": asset_id,
@@ -731,7 +678,6 @@ def main() -> None:
             padding,
             tuple(int(v) for v in cfg["fallback_color"]),
             float(cfg["roughness_factor"]),
-            coherent_max_views=0,
         )
         record = {
             "asset_id": object_dir.name,
@@ -768,7 +714,6 @@ def main() -> None:
         "rgb_assigned_fraction": float(assigned_faces_total / max(1, faces_total)),
         "object_texture_resolution": object_resolution,
         "architecture_texture_resolution": architecture_resolution,
-        "architecture_coherent_views": int(cfg["architecture_coherent_views"]),
         "atlas_padding": padding,
         "depth_source": "decoded VGGT-Omega depth scaled into COLMAP BA coordinates",
         "camera_source": "COLMAP global-BA model",
