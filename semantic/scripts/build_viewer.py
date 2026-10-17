@@ -5,12 +5,14 @@ import argparse
 import json
 import os
 import shutil
+import re
 from pathlib import Path
 
 import yaml
 
 
 SEMANTIC_ROOT = Path("/workspace/semantic")
+NEXTGEN_ROOT = Path("/workspace/nextgen")
 DEFAULT_CONFIG = Path("/opt/namma-semantic/config/default.yaml")
 
 
@@ -34,7 +36,8 @@ INDEX_HTML = r'''<!doctype html>
     <div class="controls">
       Click view: mouse look<br />
       W A S D: move &nbsp; Shift: faster<br />
-      R: reset &nbsp; G: gravity &nbsp; C: collision debug &nbsp; H: HUD
+      R: reset &nbsp; G: gravity &nbsp; C: collision debug<br />
+      M: Gaussian/mesh visual &nbsp; H: HUD
     </div>
   </div>
   <div id="crosshair">+</div>
@@ -132,17 +135,32 @@ APP_JS = r'''(() => {
     sun.intensity = 0.7;
 
     const worldRotation = quaternionFromTo(graph.up_vector, [0, 1, 0]);
-    const visualRoot = new BABYLON.TransformNode("visual_world", scene);
+    const meshRoot = new BABYLON.TransformNode("mesh_world", scene);
+    const gaussianRoot = new BABYLON.TransformNode("gaussian_world", scene);
     const collisionRoot = new BABYLON.TransformNode("collision_world", scene);
-    visualRoot.rotationQuaternion = worldRotation;
+    meshRoot.rotationQuaternion = worldRotation;
+    gaussianRoot.rotationQuaternion = worldRotation;
     collisionRoot.rotationQuaternion = worldRotation;
 
-    statusEl.textContent = "Loading visual GLB…";
+    statusEl.textContent = "Loading explicit mesh fallback…";
     const visual = await BABYLON.SceneLoader.ImportMeshAsync(null, "assets/", "digital_twin.glb", scene);
-    parentImported(visual, visualRoot);
+    parentImported(visual, meshRoot);
     for (const mesh of visual.meshes) {
       mesh.checkCollisions = false;
       mesh.isPickable = false;
+    }
+
+    let gaussian = null;
+    if (config.gaussian_asset) {
+      statusEl.textContent = "Loading Gaussian splat visual…";
+      gaussian = await BABYLON.SceneLoader.ImportMeshAsync(null, "assets/", config.gaussian_asset, scene);
+      parentImported(gaussian, gaussianRoot);
+      const gaussianScale = config.gaussian_scale || 1.0;
+      gaussianRoot.scaling = new BABYLON.Vector3(gaussianScale, gaussianScale, gaussianScale);
+      for (const mesh of gaussian.meshes) {
+        mesh.checkCollisions = false;
+        mesh.isPickable = false;
+      }
     }
 
     statusEl.textContent = "Loading collision GLB…";
@@ -153,6 +171,16 @@ APP_JS = r'''(() => {
       mesh.isPickable = false;
       mesh.visibility = 0.0;
     }
+
+    let gaussianVisual = Boolean(gaussian) && config.visual_mode !== "mesh";
+    const units = graph.units.metric_calibrated ? "metres" : "reconstruction units";
+    const updateVisualMode = () => {
+      meshRoot.setEnabled(!gaussianVisual);
+      gaussianRoot.setEnabled(gaussianVisual && Boolean(gaussian));
+      const visualLabel = gaussianVisual ? "Gaussian visual" : "explicit mesh visual";
+      unitsEl.textContent = `${graph.nodes.length} semantic assets · ${units} · ${visualLabel}`;
+    };
+    updateVisualMode();
 
     const initial = config.initial_view;
     const spawnRaw = initial ? BABYLON.Vector3.FromArray(initial.position) : BABYLON.Vector3.FromArray(graph.bounds.center);
@@ -206,15 +234,16 @@ APP_JS = r'''(() => {
         collisionDebug = !collisionDebug;
         for (const mesh of collision.meshes) mesh.visibility = collisionDebug ? 0.28 : 0.0;
       }
+      if (event.code === "KeyM" && gaussian) {
+        gaussianVisual = !gaussianVisual;
+        updateVisualMode();
+      }
       if (event.code === "KeyH") hudEl.style.display = hudEl.style.display === "none" ? "block" : "none";
       if (event.code === "ShiftLeft" || event.code === "ShiftRight") camera.speed = config.movement_speed * 2.4;
     });
     window.addEventListener("keyup", (event) => {
       if (event.code === "ShiftLeft" || event.code === "ShiftRight") camera.speed = config.movement_speed;
     });
-
-    const units = graph.units.metric_calibrated ? "metres" : "reconstruction units";
-    unitsEl.textContent = `${graph.nodes.length} semantic assets · ${units}`;
     if (config.warning) {
       warningEl.textContent = config.warning;
       warningEl.classList.remove("hidden");
@@ -223,7 +252,8 @@ APP_JS = r'''(() => {
 
     scene.onBeforeRenderObservable.add(() => {
       const p = camera.position;
-      coordsEl.textContent = `x ${p.x.toFixed(3)}   y ${p.y.toFixed(3)}   z ${p.z.toFixed(3)} · ${engine.getFps().toFixed(0)} FPS · gravity ${gravityEnabled ? "on" : "off"}`;
+      const mode = gaussianVisual ? "GS" : "mesh";
+      coordsEl.textContent = `x ${p.x.toFixed(3)}   y ${p.y.toFixed(3)}   z ${p.z.toFixed(3)} · ${engine.getFps().toFixed(0)} FPS · ${mode} · gravity ${gravityEnabled ? "on" : "off"}`;
     });
 
     engine.runRenderLoop(() => scene.render());
@@ -288,6 +318,7 @@ Controls:
     R            reset to the selected BA camera pose
     G            toggle gravity
     C            toggle collision-mesh debug display
+    M            toggle Gaussian vs explicit mesh visual
     H            hide/show HUD
 
 The viewer uses Babylon.js and the glTF loader from the Babylon CDN, so the
@@ -321,6 +352,20 @@ def load_config() -> dict:
         return yaml.safe_load(handle) or {}
 
 
+def find_gaussian_ply(scene: str) -> Path | None:
+    root = NEXTGEN_ROOT / scene / "05_gs_model" / "point_cloud"
+    if not root.is_dir():
+        return None
+    candidates = []
+    for path in root.glob("iteration_*/point_cloud.ply"):
+        match = re.search(r"iteration_(\d+)$", path.parent.name)
+        if match and path.is_file() and path.stat().st_size > 0:
+            candidates.append((int(match.group(1)), path))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Namma Stage 7: browser first-person viewer package")
     parser.add_argument("scene")
@@ -344,6 +389,9 @@ def main() -> None:
     graph = json.loads(graph_file.read_text())
     trajectory = json.loads(trajectory_file.read_text())
     config = load_config()["viewer"]
+    visual_mode = os.environ.get("NS_VIEWER_VISUAL_MODE", config.get("visual_mode", "gaussian")).strip().lower()
+    if visual_mode not in {"gaussian", "mesh"}:
+        raise RuntimeError(f"NS_VIEWER_VISUAL_MODE must be gaussian or mesh; got {visual_mode!r}")
 
     output = base / "07_viewer"
     if output.exists():
@@ -357,6 +405,20 @@ def main() -> None:
     shutil.copy2(collision_file, assets / "collision_scene.glb")
     shutil.copy2(graph_file, output / "scene_graph.json")
     shutil.copy2(trajectory_file, output / "camera_trajectory.json")
+
+    gaussian_source = find_gaussian_ply(args.scene)
+    gaussian_asset = None
+    gaussian_iteration = None
+    if gaussian_source is not None:
+        gaussian_asset = "gaussian_scene.ply"
+        shutil.copy2(gaussian_source, assets / gaussian_asset)
+        match = re.search(r"iteration_(\d+)$", gaussian_source.parent.name)
+        gaussian_iteration = int(match.group(1)) if match else None
+    elif visual_mode == "gaussian":
+        raise RuntimeError(
+            "Gaussian viewer mode requested but no trained NextGen Gaussian PLY was found under "
+            f"{NEXTGEN_ROOT / args.scene / '05_gs_model/point_cloud'}"
+        )
 
     extents = [float(value) for value in graph["bounds"]["extents"]]
     scene_span = max(max(extents), 1e-6)
@@ -396,6 +458,12 @@ def main() -> None:
         "gravity": gravity,
         "initial_view": initial_view,
         "warning": warning,
+        "visual_mode": visual_mode,
+        "gaussian_asset": gaussian_asset,
+        "gaussian_iteration": gaussian_iteration,
+        # Stage-6 visuals/collisions and BA trajectory may be uniformly scaled,
+        # but the trainer PLY always remains in original BA reconstruction units.
+        "gaussian_scale": float(graph.get("units", {}).get("meters_per_unit") or 1.0),
         "babylon_cdn": "https://cdn.babylonjs.com/babylon.js",
         "babylon_loaders_cdn": "https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js",
     }
@@ -421,7 +489,7 @@ def main() -> None:
     summary = {
         "scene": args.scene,
         "complete": True,
-        "viewer": "Babylon.js browser first-person walkthrough",
+        "viewer": "Babylon.js hybrid Gaussian + collision first-person walkthrough",
         "semantic_nodes": int(stage6_summary.get("nodes", 0)),
         "visual_triangles": int(stage6_summary.get("visual_triangles", 0)),
         "collision_triangles": int(stage6_summary.get("collision_triangles", 0)),
@@ -432,6 +500,9 @@ def main() -> None:
         "player_height": player_height,
         "player_radius": player_radius,
         "camera_spawn": initial_view.get("image") if initial_view else None,
+        "visual_mode": visual_mode,
+        "gaussian_asset": gaussian_asset,
+        "gaussian_iteration": gaussian_iteration,
         "warning": warning,
         "serve": "python3 serve.py --port 8000",
         "entrypoint": "index.html",

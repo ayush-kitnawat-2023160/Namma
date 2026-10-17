@@ -643,14 +643,22 @@ Stage 7 packages the Stage-6 visual/collision scenes into a browser runtime.
 The viewer uses the fitted Stage-3 up vector to rotate the arbitrary COLMAP
 world onto browser `+Y` at runtime; no reconstruction files are rewritten.
 
+The default visual mode is now **hybrid Gaussian**: the photorealistic
+NextGen/Graphdeco Gaussian PLY is the rendered appearance, while the Stage-6
+explicit scene remains responsible for semantics and low-poly collision. This
+avoids throwing away 3DGS appearance quality just to obtain simulator geometry.
+
 ```text
-06_scene/digital_twin.glb
+05_gs_model/.../point_cloud.ply   ---> Gaussian visual layer
+                 |
+                 |
+06_scene/digital_twin.glb         ---> explicit mesh fallback/debug
 06_scene/collision_scene.glb
 06_scene/scene_graph.json
 06_scene/camera_trajectory.json
                  |
                  v
-      Babylon.js first-person viewer
+       Babylon.js hybrid first-person viewer
                  |
       +----------+-----------+
       |          |           |
@@ -673,6 +681,7 @@ Outputs:
 ```text
 07_viewer/
   assets/
+    gaussian_scene.ply
     digital_twin.glb
     collision_scene.glb
   index.html
@@ -699,13 +708,29 @@ port over SSH. The generated `README.txt` includes the exact pattern.
 
 Controls are mouse-look, WASD movement, Shift sprint, `R` reset to the selected
 BA camera pose, `G` gravity toggle, `C` collision debug display, and `H` HUD.
+`M` toggles between the Gaussian visual and the explicit textured mesh so the
+two representations can be compared in the same camera/world frame.
 Movement, gravity and the player collider scale from scene bounds so the viewer
 still works before metric calibration. If Stage 6 is marked metric but the
 scene dimensions look implausibly small, the viewer displays a warning instead
 of silently trusting the units.
 
 The runtime currently fetches Babylon.js and its glTF loader from the official
-Babylon CDN. The generated geometry/assets themselves are local.
+Babylon CDN. Babylon's current Gaussian-splat loader accepts standard Gaussian
+PLY directly, so no conversion step is required for the Graphdeco output. The
+generated reconstruction assets themselves are local.
+
+The viewer selects the highest available `iteration_*/point_cloud.ply` from
+NextGen (normally iteration 15000). If Stage 6 has an explicit metric scale,
+that same scale is applied at runtime to the Gaussian root because the trainer
+PLY itself remains stored in original BA reconstruction units.
+
+To force the old explicit-mesh appearance for debugging:
+
+```bash
+NS_VIEWER_VISUAL_MODE=mesh \
+./run_semantic.sh viewer advio_nextgen --overwrite
+```
 
 ## Implementation order
 

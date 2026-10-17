@@ -103,6 +103,7 @@ Viewer options:
 
 Useful Stage-7 environment variables:
   NS_VIEWER_OVERWRITE=1
+  NS_VIEWER_VISUAL_MODE=gaussian|mesh
 EOF
 }
 
