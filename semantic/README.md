@@ -319,7 +319,7 @@ geometry without inventing unsupported surfaces:
 
 ```text
 floor.ply   -> dominant RANSAC plane -> convex floor polygon
-wall.ply    -> iterative vertical RANSAC planes -> wall polygons
+wall.ply    -> iterative vertical RANSAC planes -> regularized wall panels
 ceiling.ply -> parallel plane only when enough observed support exists
 pillar.ply  -> DBSCAN clusters -> oriented box proxies
 ```
@@ -329,6 +329,12 @@ the scene `up_vector`. Wall candidates are retained only when their normals are
 approximately perpendicular to that up direction. A tiny fraction of extreme
 coplanar support is clipped before polygonization so isolated semantic outliers
 cannot explode a room boundary.
+
+The quality-v2 path additionally simplifies the observed floor hull and
+regularizes each accepted wall into a clean plane-aligned rectangle bounded by
+robust quantiles of that wall's actual inlier support. This removes saw-tooth
+wall/floor borders without extrapolating the room beyond the observed support
+extent.
 
 Run:
 
@@ -387,14 +393,20 @@ Stage-2 persistent object track
         v
 confidence-filtered masked RGB-D observations
         |
+        +--> eroded uncertain mask boundary
+        +--> back-projected 3D bbox consistency
+        |
         v
 bounded per-object Uniform TSDF
         |
         v
 observed zero-crossing mesh
         |
+        +--> reject abnormally long bridge triangles
+        +--> small-component removal
+        +--> light Taubin smoothing
         v
-cleanup + small-component removal + optional decimation
+clean observed mesh
 ```
 
 The stored depth PNGs are decoded with `inverse_depth_encode_scale` from the
@@ -402,6 +414,12 @@ VGGT summary and multiplied by the VGGT->COLMAP Sim(3) scale before they are
 integrated with the BA cameras. Object volumes are bounded from the Stage-2 3D
 track boxes and adapt their resolution up to a configured maximum, which keeps
 memory bounded while preserving detail.
+
+Before TSDF integration, masked depth pixels are now back-projected into the BA
+world and rejected when they fall outside an expanded Stage-2 object bounding
+box. This is specifically intended to suppress background depth leaking through
+SAM boundaries. Long marching-cubes bridge triangles are also removed relative
+to the effective voxel size before a very light smoothing pass.
 
 Before meshing, only very strong duplicate Stage-2 tracks are consolidated.
 Tracks with any shared source frame are a hard cannot-link, and non-overlapping
@@ -484,6 +502,11 @@ Every face also has to agree with the decoded VGGT depth in the selected BA
 camera before source RGB is accepted. Faces that do not have a trustworthy
 source view retain the Stage-4 vertex color when available, or a neutral
 fallback for architecture.
+
+Architecture now uses a small coherent source-view set (three by default)
+before falling back to per-face view selection. This greatly reduces the
+checkerboard/mosaic appearance caused when neighboring wall triangles choose
+different exposures from many video frames.
 
 Default atlas sizes are 1024x1024 per object and 2048x2048 per architecture
 piece. These can be reduced for a quick test without changing code.
