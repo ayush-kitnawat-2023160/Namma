@@ -7,6 +7,7 @@ CMD="${1:-help}"
 GPU_DEVICE="${NP_GPU_DEVICE:-0}"
 RAM_LIMIT="${NP_RAM_LIMIT:-32g}"
 SHM_SIZE="${NP_SHM_SIZE:-16g}"
+VIEWER_NAME="${NAMMA_PANOGRAPH_VIEWER_NAME:-namma-panograph-viewer}"
 
 mkdir -p \
   "$ROOT/data/panograph" \
@@ -21,6 +22,28 @@ if [[ "$CMD" == "build" ]]; then
     -t "$IMAGE" \
     -f "$ROOT/panograph/Dockerfile" \
     "$ROOT"
+fi
+
+# Host-side viewer lifecycle helpers.  These are handled here (rather than by
+# the container entrypoint) so the SPHR server can stay alive after this shell
+# command returns.
+if [[ "$CMD" == "stop" ]]; then
+  if docker ps -a --format '{{.Names}}' | grep -Fxq "$VIEWER_NAME"; then
+    docker stop "$VIEWER_NAME" >/dev/null
+    echo "Stopped PanoGraph viewer: $VIEWER_NAME"
+  else
+    echo "PanoGraph viewer is not running: $VIEWER_NAME"
+  fi
+  exit 0
+fi
+
+if [[ "$CMD" == "logs" ]]; then
+  if ! docker ps -a --format '{{.Names}}' | grep -Fxq "$VIEWER_NAME"; then
+    echo "PanoGraph viewer container not found: $VIEWER_NAME" >&2
+    echo "Start it with: ./run_panograph.sh serve-bg hindoor_unibs" >&2
+    exit 2
+  fi
+  exec docker logs -f "$VIEWER_NAME"
 fi
 
 COMMON=(
@@ -65,10 +88,24 @@ case "$CMD" in
   reconstruct|pipeline|gpu-check)
     GPU_ARGS=(--gpus "device=${GPU_DEVICE}")
     ;;
-  serve)
+  serve|serve-bg)
     PORT_ARGS=(-p "${NP_VIEWER_PORT:-3000}:3000")
     ;;
 esac
+
+if [[ "$CMD" == "serve-bg" ]]; then
+  SCENE="${2:-hindoor_unibs}"
+  docker rm -f "$VIEWER_NAME" >/dev/null 2>&1 || true
+  CID="$(docker run -d \
+    --name "$VIEWER_NAME" \
+    "${PORT_ARGS[@]}" \
+    "${COMMON[@]}" \
+    "$IMAGE" serve "$SCENE")"
+  echo "Started PanoGraph viewer in background."
+  echo "Container: $VIEWER_NAME ($CID)"
+  echo "URL: http://127.0.0.1:${NP_VIEWER_PORT:-3000}/?config=/datasets/panograph/$SCENE/bootstrap.json"
+  exit 0
+fi
 
 TTY_ARGS=()
 [[ -t 0 && -t 1 ]] && TTY_ARGS=(-it)
