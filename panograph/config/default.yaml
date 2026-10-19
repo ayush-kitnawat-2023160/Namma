@@ -1,0 +1,31 @@
+dataset:
+  repo_id: ushah/HIndoor-8K
+  scene: unibs
+  rgb_only: true
+
+panovggt:
+  checkpoint_repo: YijingGuo/PanoVGGT
+  checkpoint_file: model.pt
+  pair_stride: 1
+  gpu_memory_fraction: 0.82
+  min_free_vram_mb: 18000
+
+graph:
+  camera_height: 1.6
+  median_edge_length: 2.0
+  add_knn_edges: true
+  knn_k: 2
+  knn_radius_factor: 1.8
+  yaw_sign: 1.0
+  yaw_offset_deg: 0.0
+
+viewer:
+  max_width: 4096
+  webp_quality: 88
+  port: 3000
+  title: Namma PanoGraph
+
+safety:
+  host_memory_limit: 32g
+  shm_size: 16g
+  pytorch_alloc_conf: expandable_segments:True,max_split_size_mb:128

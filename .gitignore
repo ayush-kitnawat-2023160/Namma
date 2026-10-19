@@ -12,3 +12,11 @@ semantic/checkpoints/*
 !semantic/checkpoints/.gitkeep
 semantic/hf_cache/*
 !semantic/hf_cache/.gitkeep
+panograph/checkpoints/*
+!panograph/checkpoints/.gitkeep
+panograph/hf_cache/*
+!panograph/hf_cache/.gitkeep
+panograph/npm_cache/*
+!panograph/npm_cache/.gitkeep
+data/panograph/**
+!data/panograph/.gitkeep
