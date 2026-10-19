@@ -52,6 +52,22 @@ def main() -> None:
     boot_nodes = space.get("nodes", [])
     require(len(boot_nodes) == 10, "SPHR bootstrap does not contain 10 panorama nodes")
     require(space.get("initialNode") in node_ids, "SPHR initialNode is not a graph node")
+    invalid_pano_urls = [
+        node.get("image", "")
+        for node in boot_nodes
+        if node.get("image")
+        and not (
+            str(node["image"]).startswith("/datasets/")
+            or str(node["image"]).startswith("/demo/")
+            or str(node["image"]).startswith("http://")
+            or str(node["image"]).startswith("https://")
+        )
+    ]
+    require(
+        not invalid_pano_urls,
+        "SPHR would interpret these panorama image paths as IIIF identifiers instead of direct files: "
+        f"{invalid_pano_urls}",
+    )
     assets = package / "assets" / "panos"
     missing_assets = [node["uuid"] for node in boot_nodes if not (assets / f"{node['uuid']}.webp").is_file()]
     require(not missing_assets, f"Missing panorama assets: {missing_assets}")

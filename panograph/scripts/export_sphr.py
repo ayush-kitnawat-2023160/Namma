@@ -34,7 +34,13 @@ def main() -> None:
             raise RuntimeError(f"Viewer panorama missing: {src}")
         dest = assets / f"{node['id']}.webp"
         shutil.copy2(src, dest)
-        public_path = f"/panograph/{args.scene}/panos/{dest.name}"
+        # SPHR treats packaged equirectangular images as direct static files
+        # only when they live under /datasets or /demo. Other relative paths
+        # are interpreted as IIIF identifiers and SPHR appends
+        # /full/full/0/default.jpg, which breaks plain WebP panorama assets.
+        # Keep our generated tour under /datasets so PanoramaLayer loads the
+        # file directly.
+        public_path = f"/datasets/panograph/{args.scene}/panos/{dest.name}"
         x, y, z = node["position"]
         fx, fy, fz = node["floor_position"]
         nodes.append({
@@ -97,7 +103,7 @@ def main() -> None:
         "panorama_nodes": len(nodes),
         "tourpoints": len(tourpoints),
         "bootstrap": str(out / "bootstrap.json"),
-        "viewer_url": f"http://127.0.0.1:3000/?config=/panograph/{args.scene}/bootstrap.json",
+        "viewer_url": f"http://127.0.0.1:3000/?config=/datasets/panograph/{args.scene}/bootstrap.json",
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     print("=== NAMMA PANOGRAPH: SPHR PACKAGE READY ===")

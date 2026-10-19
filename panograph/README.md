@@ -122,7 +122,7 @@ Start the viewer:
 Then open:
 
 ```text
-http://127.0.0.1:3000/?config=/panograph/hindoor_unibs/bootstrap.json
+http://127.0.0.1:3000/?config=/datasets/panograph/hindoor_unibs/bootstrap.json
 ```
 
 For a remote server, tunnel the port from the laptop:
