@@ -3,15 +3,47 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 from pathlib import Path
 
-from PIL import Image
+from PIL import ExifTags, Image
 
 from common import DATA_ROOT, env, env_bool, env_int, load_config, scene_root
 
 
 Image.MAX_IMAGE_PIXELS = None
+
+
+def _rational(value) -> float:
+    return float(value[0]) / float(value[1]) if isinstance(value, tuple) else float(value)
+
+
+def _gps_degrees(values, reference) -> float:
+    degrees, minutes, seconds = (_rational(v) for v in values)
+    result = degrees + minutes / 60.0 + seconds / 3600.0
+    return -result if str(reference).upper() in {"S", "W"} else result
+
+
+def read_capture_metadata(path: Path, image: Image.Image) -> dict:
+    exif = image.getexif()
+    gps = exif.get_ifd(ExifTags.IFD.GPSInfo)
+    metadata = {}
+    try:
+        metadata["latitude"] = _gps_degrees(gps[2], gps[1])
+        metadata["longitude"] = _gps_degrees(gps[4], gps[3])
+        if 6 in gps:
+            metadata["altitude_m"] = _rational(gps[6]) * (-1.0 if gps.get(5) == b"\x01" else 1.0)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        pass
+
+    match = re.search(rb"<GPano:PoseHeadingDegrees>\s*([-+0-9.eE]+)\s*</GPano:PoseHeadingDegrees>", path.read_bytes())
+    if match:
+        try:
+            metadata["heading_degrees"] = float(match.group(1))
+        except ValueError:
+            pass
+    return metadata
 
 
 def main() -> None:
@@ -61,6 +93,7 @@ def main() -> None:
                 image = image.resize((max_width, new_h), Image.Resampling.LANCZOS)
             web_path = web_out / f"{station_id}.webp"
             image.convert("RGB").save(web_path, "WEBP", quality=quality, method=6)
+            capture_metadata = read_capture_metadata(src, image)
 
         stations.append({
             "id": station_id,
@@ -70,6 +103,7 @@ def main() -> None:
             "web": str(web_path),
             "source_width": width,
             "source_height": height,
+            **capture_metadata,
         })
 
     manifest = {

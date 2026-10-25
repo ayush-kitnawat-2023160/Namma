@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from common import DATA_ROOT, load_config, scene_root
@@ -18,15 +19,10 @@ def main() -> None:
     parser.add_argument("scene", nargs="?", default="hindoor_unibs")
     args = parser.parse_args()
     cfg = load_config()
-    dataset_scene = str(cfg["dataset"]["scene"])
+    dataset_scene = str(os.environ.get("NP_DATASET_SCENE", cfg["dataset"]["scene"]))
     dataset_root = DATA_ROOT / "HIndoor-8K" / dataset_scene
     rgb = sorted((dataset_root / "rgb").glob("*")) if (dataset_root / "rgb").is_dir() else []
     depth_dir = dataset_root / "depth"
-
-    # The default experiment is intentionally RGB-only. A depth directory in
-    # our local snapshot means the download policy has been violated.
-    require(len(rgb) == 10, f"Expected exactly 10 unibs RGB panoramas, found {len(rgb)}")
-    require(not depth_dir.exists(), f"RGB-only policy violated: depth directory exists: {depth_dir}")
 
     root = scene_root(args.scene)
     manifest_file = root / "01_panoramas" / "manifest.json"
@@ -40,9 +36,12 @@ def main() -> None:
     manifest = json.loads(manifest_file.read_text())
     graph = json.loads(graph_file.read_text())
     bootstrap = json.loads(bootstrap_file.read_text())
-    require(int(manifest.get("count", 0)) == 10, "Prepared manifest does not contain 10 stations")
-    require(len(graph.get("nodes", [])) == 10, "Graph does not contain 10 nodes")
-    require(len(graph.get("edges", [])) >= 9, "Graph is not connected by at least the temporal chain")
+    expected_count = int(manifest.get("count", 0))
+    require(expected_count >= 2, f"Prepared manifest must contain at least 2 stations, found {expected_count}")
+    require(len(rgb) == expected_count, f"Dataset RGB count ({len(rgb)}) does not match prepared stations ({expected_count})")
+    require(not depth_dir.exists(), f"RGB-only policy violated: depth directory exists: {depth_dir}")
+    require(len(graph.get("nodes", [])) == expected_count, f"Graph does not contain {expected_count} nodes")
+    require(len(graph.get("edges", [])) >= expected_count - 1, "Graph is not connected by at least the temporal chain")
 
     node_ids = {node["id"] for node in graph["nodes"]}
     for edge in graph["edges"]:
@@ -50,7 +49,7 @@ def main() -> None:
 
     space = bootstrap.get("space", {}).get("space_data", {})
     boot_nodes = space.get("nodes", [])
-    require(len(boot_nodes) == 10, "SPHR bootstrap does not contain 10 panorama nodes")
+    require(len(boot_nodes) == expected_count, f"SPHR bootstrap does not contain {expected_count} panorama nodes")
     require(space.get("initialNode") in node_ids, "SPHR initialNode is not a graph node")
     invalid_pano_urls = [
         node.get("image", "")

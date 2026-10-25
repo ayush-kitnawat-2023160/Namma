@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#07090d" />
     <title>Namma NextGen Viewer</title>
-    <script type="module" crossorigin src="./assets/index-Dd9IKSnk.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DgcSyki-.css">
+    <script type="module" crossorigin src="./assets/index-B6rr5cmB.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Du8beRb1.css">
   </head>
   <body>
     <div id="app">
@@ -18,6 +18,22 @@
           <div class="title" id="scene-title">NextGen reconstruction</div>
         </div>
         <div class="top-actions">
+          <label class="viewer-control">
+            <span>SH detail</span>
+            <select id="sh-degree" aria-label="Spherical harmonics detail">
+              <option value="0">Low</option>
+              <option value="1">Medium</option>
+              <option value="2">High</option>
+            </select>
+          </label>
+          <label class="viewer-control">
+            <span>Opacity cutoff</span>
+            <select id="alpha-threshold" aria-label="Minimum splat opacity">
+              <option value="1">1 / 255</option>
+              <option value="5">5 / 255</option>
+              <option value="10">10 / 255</option>
+            </select>
+          </label>
           <button id="renders-button" class="ghost">Renders</button>
           <button id="reset-button" class="ghost" disabled>Reset view</button>
         </div>
@@ -45,9 +61,12 @@
 
       <div id="loading" class="loading hidden">
         <div class="spinner"></div>
-        <div>
-          <strong>Loading Gaussian scene…</strong>
-          <span id="loading-detail">Downloading and preparing splats in your browser.</span>
+        <div class="loading-copy">
+          <strong id="loading-title">Loading Gaussian scene…</strong>
+          <span id="loading-detail">Large scenes can take a few minutes to prepare in your browser.</span>
+          <div class="loading-progress" role="progressbar" aria-label="Scene loading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="loading-progress-value"></div>
+          </div>
         </div>
       </div>
 

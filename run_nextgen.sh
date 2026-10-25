@@ -75,7 +75,7 @@ if [[ "$CMD" == "viewer" || "$CMD" == "viewer-bg" ]]; then
 fi
 
 case "$CMD" in
-  pipeline|vggt|sfm|fuse|gs-dataset|train|render)
+  pipeline|vggt|sfm|fuse|gs-dataset|train|render|postprocess)
     MIN_DISK_GB="${NG_MIN_FREE_DISK_GB:-25}"
     FREE_DISK_KB="$(df -Pk "$ROOT" | awk 'NR==2 {print $4}')"
     FREE_DISK_GB=$(( FREE_DISK_KB / 1024 / 1024 ))
@@ -123,7 +123,7 @@ do
 done
 
 case "$CMD" in
-  help|-h|--help|inspect|fix-perms|shell|bash|fuse|viewer|viewer-bg) GPU_ARGS=() ;;
+  help|-h|--help|inspect|fix-perms|shell|bash|fuse|postprocess|viewer|viewer-bg) GPU_ARGS=() ;;
   check) GPU_ARGS=(--gpus all) ;;
   prepare)
     if [[ -n "${NG_CAMERA_PROFILE:-}" ]]; then GPU_ARGS=(); else GPU_ARGS=(--gpus all); fi

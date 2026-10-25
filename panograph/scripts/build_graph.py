@@ -34,6 +34,19 @@ def flatten_centers(centers: np.ndarray, target_median_step: float) -> tuple[np.
     return points, axis_x, axis_z
 
 
+def gps_to_local_enu(stations: list[dict]) -> np.ndarray | None:
+    if not all("latitude" in station and "longitude" in station for station in stations):
+        return None
+    lat = np.radians(np.array([float(station["latitude"]) for station in stations]))
+    lon = np.radians(np.array([float(station["longitude"]) for station in stations]))
+    lat0 = float(lat.mean())
+    lon0 = float(lon.mean())
+    radius_m = 6_378_137.0
+    east = radius_m * (lon - lon0) * math.cos(lat0)
+    north = radius_m * (lat - lat0)
+    return np.stack([east, north], axis=1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("scene", nargs="?", default="hindoor_unibs")
@@ -58,7 +71,12 @@ def main() -> None:
         if candidate.shape == (n, 4, 4) and np.isfinite(candidate).all():
             poses = candidate
 
-    if poses is not None:
+    gps_points = gps_to_local_enu(stations)
+    if gps_points is not None:
+        points2d = gps_points
+        axis_x = axis_z = None
+        layout_method = "exif_gps_local_enu"
+    elif poses is not None:
         centers = poses[:, :3, 3]
         try:
             points2d, axis_x, axis_z = flatten_centers(centers, target_step)
@@ -75,7 +93,9 @@ def main() -> None:
     nodes = []
     for i, station in enumerate(stations):
         yaw = 0.0
-        if poses is not None and axis_x is not None and axis_z is not None:
+        if gps_points is not None and "heading_degrees" in station:
+            yaw = yaw_sign * math.radians(float(station["heading_degrees"])) + yaw_offset
+        elif poses is not None and axis_x is not None and axis_z is not None:
             forward = poses[i][:3, 2]
             fx = float(np.dot(forward, axis_x))
             fz = float(np.dot(forward, axis_z))
@@ -128,7 +148,7 @@ def main() -> None:
     graph = {
         "scene": args.scene,
         "layout_method": layout_method,
-        "units": "viewer_relative_units",
+        "units": "meters" if gps_points is not None else "viewer_relative_units",
         "nodes": nodes,
         "edges": edges,
     }

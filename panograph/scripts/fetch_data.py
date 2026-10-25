@@ -20,14 +20,24 @@ def main() -> None:
     print(f"Scene:   {scene}")
     print("Policy:  RGB ONLY (LiDAR depth is deliberately not downloaded)")
 
-    snapshot_download(
-        repo_id=repo_id,
-        repo_type="dataset",
-        allow_patterns=[f"{scene}/rgb/*"],
-        local_dir=str(target),
-    )
-
     rgb_dir = target / scene / "rgb"
+    # Permit a previously staged local dataset (for example, a public sample
+    # whose host does not distribute through Hugging Face). This also avoids
+    # re-downloading data already present in the shared workspace.
+    existing_images = sorted(
+        p for p in rgb_dir.iterdir()
+        if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+    ) if rgb_dir.is_dir() else []
+    if existing_images:
+        print(f"Using staged local RGB panoramas: {rgb_dir}")
+    else:
+        snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            allow_patterns=[f"{scene}/rgb/*"],
+            local_dir=str(target),
+        )
+
     images = sorted(
         p for p in rgb_dir.iterdir()
         if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}

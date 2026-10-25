@@ -121,7 +121,49 @@ Useful individual commands:
 ./run_nextgen.sh gs-dataset <scene>
 ./run_nextgen.sh train <scene>
 ./run_nextgen.sh render <scene>
+./run_nextgen.sh postprocess <scene>
 ```
+
+The optional post-processing command writes
+`outputs/nextgen/<scene>/08_postprocess/cleaned.ply` and
+`cleaned.report.json`, leaving the trained model intact. In addition to the
+isolated/far-from-surface rule, it checks nearby VGGT views for repeated
+high-confidence depth contradictions. A splat is flagged only when it projects
+in front of a smooth observed surface in at least five of at least six reliable
+observations by default (from the 12 nearest cameras). Missing, occluded, low-confidence, and depth-edge observations do not
+count as contradictions. The report includes depth vote counts and cleanup
+settings. Review the report and compare renders before using the cleaned model.
+For an explicit opacity cutoff, which can discard real detail:
+
+```bash
+./run_nextgen.sh postprocess <scene> --min-opacity 0.02
+```
+
+To keep the previous geometry-only cleanup behavior, pass
+`--disable-depth-check`. Depth thresholds can be tuned with
+`--depth-min-conflicts`, `--depth-min-observations`, and
+`--depth-relative-tolerance`.
+
+Open the cleaned PLY in the same viewer with `model=cleaned` added to the URL,
+for example:
+
+```text
+http://127.0.0.1:8080/viewer/?scene=<scene>&model=cleaned
+```
+
+The depth-aware output can be viewed with `model=depth-aware`:
+
+```text
+http://127.0.0.1:8080/viewer/?scene=<scene>&model=depth-aware
+```
+
+The interactive viewer also exposes spherical-harmonic detail (up to degree 2)
+and opacity cutoffs of 1, 5, or 10/255. Changing the opacity cutoff reloads the
+scene; changing SH detail applies immediately. The default SH degree is 2.
+After the first download, the browser caches each Gaussian PLY by file version,
+so reloading the viewer reuses the local cached copy. A newly trained or
+post-processed PLY receives a new version automatically and is downloaded once.
+Clearing the browser's cached files removes the local copy.
 
 ### Full-resolution 3DGS with CPU camera offload
 
