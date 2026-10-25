@@ -123,6 +123,65 @@ Useful individual commands:
 ./run_nextgen.sh render <scene>
 ```
 
+## Interactive localhost viewer
+
+NextGen includes a self-contained browser viewer for the trained Graphdeco
+Gaussian PLY. It also exposes the ordinary rendered PNGs in a gallery, which is
+useful over a slower VPN before downloading the much larger Gaussian scene.
+
+The viewer bundle is committed under `nextgen/viewer/dist`, so the college
+server does **not** need Node/npm. The existing NextGen Docker image serves the
+static app with Python and mounts the chosen scene read-only.
+
+Start it in the background:
+
+```bash
+./run_nextgen.sh viewer-bg frames_omega_test
+```
+
+The wrapper auto-detects the latest `iteration_*` directory and prints a URL
+similar to:
+
+```text
+http://127.0.0.1:8080/viewer/?scene=frames_omega_test&iter=10000
+```
+
+The Docker port is deliberately published on server `127.0.0.1` only. When the
+scene lives on a remote college machine, forward the port from your laptop:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 <college-server>
+```
+
+Then open the printed `http://127.0.0.1:8080/viewer/...` URL in the **laptop** browser.
+VS Code Remote SSH users can instead forward port 8080 from the **Ports** panel.
+
+Lifecycle commands:
+
+```bash
+./run_nextgen.sh viewer-bg <scene>   # background
+./run_nextgen.sh viewer <scene>      # foreground
+./run_nextgen.sh viewer-logs         # follow server logs
+./run_nextgen.sh viewer-stop         # stop/remove viewer container
+```
+
+Use another local port when 8080 is occupied:
+
+```bash
+NG_VIEWER_PORT=8081 ./run_nextgen.sh viewer-bg frames_omega_test
+```
+
+Force a particular trained iteration if a scene contains several checkpoints:
+
+```bash
+NG_VIEWER_ITER=30000 ./run_nextgen.sh viewer-bg my_scene
+```
+
+The interactive 3D button loads
+`06_gs_model/point_cloud/iteration_<N>/point_cloud.ply` directly. Large Gaussian
+PLYs can be hundreds of MB, so the viewer intentionally does not fetch them until
+you click **Load interactive 3D**. The **Renders** panel is much lighter-weight.
+
 ## Fail-safe Docker / GPU defaults
 
 NextGen is intentionally configured so an oversized reconstruction should kill

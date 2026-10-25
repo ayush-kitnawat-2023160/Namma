@@ -17,6 +17,10 @@ Commands:
   gs-dataset <scene>                 Build depth-regularized Graphdeco dataset
   train <scene>                      Train depth-regularized 3DGS
   render <scene>                     Render trained views
+  viewer <scene>                     Serve interactive Gaussian viewer
+  viewer-bg <scene>                  Start viewer in background (host wrapper)
+  viewer-logs                        Follow background viewer logs (host wrapper)
+  viewer-stop                        Stop background viewer (host wrapper)
   pipeline <video> [scene]           Run all NextGen stages
   fix-perms                          Fix host ownership of outputs
   shell                              Interactive container shell
@@ -102,6 +106,13 @@ case "${1:-help}" in
   render)
     shift
     exec /opt/namma-nextgen/scripts/render_gs.sh "$@"
+    ;;
+  viewer)
+    [[ -d /srv/viewer ]] || { echo "ERROR: viewer bundle is not mounted" >&2; exit 2; }
+    [[ -d /srv/scene ]] || { echo "ERROR: scene output is not mounted" >&2; exit 2; }
+    echo "=== NAMMA NEXTGEN: INTERACTIVE VIEWER ==="
+    echo "Serving on container port 8080"
+    exec python -m http.server 8080 --bind 0.0.0.0 --directory /srv
     ;;
   pipeline)
     shift

@@ -8,6 +8,7 @@ __pycache__/
 .DS_Store
 nextgen/checkpoints/*
 !nextgen/checkpoints/.gitkeep
+nextgen/viewer/node_modules/
 semantic/checkpoints/*
 !semantic/checkpoints/.gitkeep
 semantic/hf_cache/*
@@ -20,3 +21,8 @@ panograph/npm_cache/*
 !panograph/npm_cache/.gitkeep
 data/panograph/**
 !data/panograph/.gitkeep
+
+pansplat/checkpoints/*
+!pansplat/checkpoints/.gitkeep
+pansplat/cache/*
+!pansplat/cache/.gitkeep

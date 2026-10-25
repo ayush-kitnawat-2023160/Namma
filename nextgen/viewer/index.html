@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07090d" />
+    <title>Namma NextGen Viewer</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewer"></div>
+
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">NAMMA · VGGT-Ω + 3DGS</div>
+          <div class="title" id="scene-title">NextGen reconstruction</div>
+        </div>
+        <div class="top-actions">
+          <button id="renders-button" class="ghost">Renders</button>
+          <button id="reset-button" class="ghost" disabled>Reset view</button>
+        </div>
+      </header>
+
+      <section id="welcome" class="panel welcome">
+        <div class="badge">Interactive Gaussian viewer</div>
+        <h1 id="welcome-title">Scene ready</h1>
+        <p>
+          Inspect the PNG renders instantly, or load the full Gaussian PLY for
+          free 3D orbit/pan/zoom. The PLY can be hundreds of MB, so it is loaded
+          only when you ask for it.
+        </p>
+        <div class="meta-grid">
+          <div><span>Iteration</span><strong id="iteration-value">—</strong></div>
+          <div><span>PLY</span><strong id="ply-size">checking…</strong></div>
+          <div><span>Renders</span><strong id="render-count">checking…</strong></div>
+        </div>
+        <div class="welcome-actions">
+          <button id="load-button" class="primary">Load interactive 3D</button>
+          <button id="open-renders-button" class="secondary">View renders first</button>
+        </div>
+        <div class="hint">Mouse: left-drag orbit · right-drag pan · wheel zoom · I toggles viewer stats</div>
+      </section>
+
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <div>
+          <strong>Loading Gaussian scene…</strong>
+          <span id="loading-detail">Downloading and preparing splats in your browser.</span>
+        </div>
+      </div>
+
+      <aside id="renders-panel" class="renders-panel hidden">
+        <div class="renders-head">
+          <div>
+            <div class="eyebrow">TRAINING-VIEW CHECK</div>
+            <h2>Rendered frames</h2>
+          </div>
+          <button id="close-renders" class="ghost">Close</button>
+        </div>
+        <div id="render-grid" class="render-grid"></div>
+        <div id="render-empty" class="empty hidden">No rendered PNGs found yet. Run the render stage first.</div>
+      </aside>
+
+      <div id="status" class="status">Ready</div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

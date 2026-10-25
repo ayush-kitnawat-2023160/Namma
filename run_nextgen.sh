@@ -4,6 +4,8 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="${NAMMA_NEXTGEN_IMAGE:-namma-nextgen:latest}"
 CMD="${1:-help}"
+VIEWER_NAME="${NAMMA_NEXTGEN_VIEWER_NAME:-namma-nextgen-viewer}"
+VIEWER_PORT="${NG_VIEWER_PORT:-8080}"
 
 mkdir -p \
   "$ROOT/data" \
@@ -21,6 +23,56 @@ else
 fi
 MEM_LIMIT="${NG_DOCKER_MEMORY:-${SAFE_MEM_GB}g}"
 SWAP_LIMIT="${NG_DOCKER_MEMORY_SWAP:-$MEM_LIMIT}"
+
+if [[ "$CMD" == "viewer-stop" ]]; then
+  if docker ps -a --format '{{.Names}}' | grep -Fxq "$VIEWER_NAME"; then
+    docker rm -f "$VIEWER_NAME" >/dev/null
+    echo "Stopped NextGen viewer: $VIEWER_NAME"
+  else
+    echo "NextGen viewer is not running: $VIEWER_NAME"
+  fi
+  exit 0
+fi
+
+if [[ "$CMD" == "viewer-logs" ]]; then
+  if ! docker ps -a --format '{{.Names}}' | grep -Fxq "$VIEWER_NAME"; then
+    echo "NextGen viewer container not found: $VIEWER_NAME" >&2
+    echo "Start it with: ./run_nextgen.sh viewer-bg <scene>" >&2
+    exit 2
+  fi
+  exec docker logs -f "$VIEWER_NAME"
+fi
+
+VIEWER_ARGS=()
+VIEWER_URL=""
+VIEWER_SCENE=""
+VIEWER_ITER=""
+if [[ "$CMD" == "viewer" || "$CMD" == "viewer-bg" ]]; then
+  [[ $# -ge 2 ]] || { echo "Usage: ./run_nextgen.sh $CMD <scene>" >&2; exit 2; }
+  VIEWER_SCENE="$2"
+  SCENE_ROOT="$ROOT/outputs/nextgen/$VIEWER_SCENE"
+  [[ -d "$SCENE_ROOT" ]] || { echo "ERROR: scene output not found: $SCENE_ROOT" >&2; exit 2; }
+  [[ -f "$ROOT/nextgen/viewer/dist/index.html" ]] || {
+    echo "ERROR: built NextGen viewer missing: nextgen/viewer/dist/index.html" >&2
+    echo "Build it on a development machine with: cd nextgen/viewer && npm install && npm run build" >&2
+    exit 2
+  }
+
+  if [[ -n "${NG_VIEWER_ITER:-}" ]]; then
+    VIEWER_ITER="$NG_VIEWER_ITER"
+  else
+    LATEST_ITER_DIR="$(find "$SCENE_ROOT/06_gs_model/point_cloud" -maxdepth 1 -type d -name 'iteration_*' -printf '%f\n' 2>/dev/null | sort -V | tail -1 || true)"
+    VIEWER_ITER="${LATEST_ITER_DIR#iteration_}"
+  fi
+  [[ -n "$VIEWER_ITER" ]] || VIEWER_ITER="${NG_GS_ITERS:-10000}"
+
+  VIEWER_ARGS=(
+    -p "127.0.0.1:${VIEWER_PORT}:8080"
+    -v "$ROOT/nextgen/viewer/dist:/srv/viewer:ro"
+    -v "$SCENE_ROOT:/srv/scene:ro"
+  )
+  VIEWER_URL="http://127.0.0.1:${VIEWER_PORT}/viewer/?scene=${VIEWER_SCENE}&iter=${VIEWER_ITER}"
+fi
 
 case "$CMD" in
   pipeline|vggt|sfm|fuse|gs-dataset|train|render)
@@ -71,7 +123,7 @@ do
 done
 
 case "$CMD" in
-  help|-h|--help|inspect|fix-perms|shell|bash|fuse) GPU_ARGS=() ;;
+  help|-h|--help|inspect|fix-perms|shell|bash|fuse|viewer|viewer-bg) GPU_ARGS=() ;;
   check) GPU_ARGS=(--gpus all) ;;
   prepare)
     if [[ -n "${NG_CAMERA_PROFILE:-}" ]]; then GPU_ARGS=(); else GPU_ARGS=(--gpus all); fi
@@ -81,11 +133,26 @@ esac
 
 echo "[nextgen] container safety: memory=$MEM_LIMIT, swap=$SWAP_LIMIT, shm=${NG_DOCKER_SHM:-6g}, pids=${NG_DOCKER_PIDS:-4096}" >&2
 
+if [[ "$CMD" == "viewer-bg" ]]; then
+  docker rm -f "$VIEWER_NAME" >/dev/null 2>&1 || true
+  CID="$(docker run -d \
+    --name "$VIEWER_NAME" \
+    "${VIEWER_ARGS[@]}" \
+    "${COMMON[@]}" \
+    "$IMAGE" viewer "$VIEWER_SCENE")"
+  echo "Started NextGen Gaussian viewer in background."
+  echo "Container: $VIEWER_NAME ($CID)"
+  echo "Server-local URL: $VIEWER_URL"
+  echo "Laptop access: forward port ${VIEWER_PORT} over SSH/VS Code, then open the same localhost URL."
+  exit 0
+fi
+
 TTY_ARGS=()
 [[ -t 0 && -t 1 ]] && TTY_ARGS=(-it)
 
 exec docker run \
   "${TTY_ARGS[@]}" \
   "${GPU_ARGS[@]}" \
+  "${VIEWER_ARGS[@]}" \
   "${COMMON[@]}" \
   "$IMAGE" "$@"
