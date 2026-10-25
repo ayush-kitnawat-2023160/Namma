@@ -14,6 +14,7 @@ RUN python -m pip install --no-cache-dir \
       "numpy==1.26.4" \
       "opencv-python==4.11.0.86" \
       "pycolmap>=3.10" \
+      "open3d==0.19.0" \
       h5py scipy scikit-image trimesh
 
 RUN git clone https://github.com/facebookresearch/vggt-omega.git /opt/vggt-omega \

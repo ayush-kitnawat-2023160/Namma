@@ -110,6 +110,10 @@ The current persistent stage tree is:
 05_gs_dataset/
 06_gs_model/
 07_renders/
+08_mesh/
+  truth/             # cross-view-verified TSDF truth mesh
+  presentation/      # same geometry with multiview 4K color bake (PLY + GLB)
+  sugar/             # SuGaR surface mesh + refined Gaussians + UV-textured OBJ
 ```
 
 Useful individual commands:
@@ -121,7 +125,122 @@ Useful individual commands:
 ./run_nextgen.sh gs-dataset <scene>
 ./run_nextgen.sh train <scene>
 ./run_nextgen.sh render <scene>
+./run_nextgen.sh mesh-truth <scene>
+./run_nextgen.sh mesh-pretty <scene>
+./run_nextgen.sh mesh <scene>
 ```
+
+## Three mesh products
+
+The mesh stage deliberately produces different representations for different
+questions instead of forcing one mesh to be both a diagnostic and a presentation
+artifact.
+
+### 1. Truth mesh: verified TSDF
+
+`mesh-truth` reuses the VGGT-Omega depths, confidence maps, camera poses and the
+same cross-view depth-consistency logic used by geometry fusion. Only pixels
+supported by other views are integrated into an Open3D scalable TSDF. The mesh
+is extracted with Marching Cubes and receives only conservative cleanup: duplicate
+or degenerate topology and very tiny disconnected components are removed. There
+is no smoothing or large-hole filling.
+
+```bash
+NG_TSDF_NEIGHBORS=8 \
+NG_TSDF_MIN_SUPPORT=2 \
+NG_TSDF_REL_DEPTH=0.03 \
+./run_nextgen.sh mesh-truth retail_competition_160
+```
+
+Primary output:
+
+```text
+08_mesh/truth/truth_tsdf.ply
+```
+
+The uncleaned extraction is retained as `truth_tsdf_raw.ply` for comparison.
+
+### 2. Presentation mesh: same geometry, better appearance
+
+`mesh-pretty` starts from `truth_tsdf.ply`. It does not invent new geometry. For
+each mesh vertex it projects the point into the selected native-resolution RGB
+frames, rejects occluded/depth-inconsistent observations, scores valid views by
+VGGT confidence and viewing angle, and keeps the strongest observation. The
+result is exported both as a vertex-colored PLY and a browser-friendly GLB.
+
+```bash
+NG_PRESENTATION_TARGET_TRIANGLES=1000000 \
+./run_nextgen.sh mesh-pretty retail_competition_160
+```
+
+Outputs:
+
+```text
+08_mesh/presentation/presentation_mesh.ply
+08_mesh/presentation/presentation_mesh.glb
+```
+
+The GLB deliberately uses dense baked vertex colors rather than a fragile custom
+UV atlas. The separate SuGaR product below supplies a conventional UV-textured
+OBJ while keeping this presentation mesh tied to the TSDF truth geometry.
+
+Run truth + presentation together with:
+
+```bash
+./run_nextgen.sh mesh retail_competition_160
+```
+
+### 3. SuGaR mesh from the trained 3DGS
+
+SuGaR uses an older CUDA/PyTorch/PyTorch3D stack than NextGen, so it lives in an
+isolated image and consumes the already-trained Graphdeco checkpoint instead of
+modifying the reconstruction environment.
+
+Build once:
+
+```bash
+./build_sugar.sh
+```
+
+Then run against the existing 30k Graphdeco model:
+
+```bash
+NG_GS_ITERS=30000 \
+NG_GPU_MEMORY_FRACTION=0.88 \
+NG_SUGAR_REGULARIZATION=dn_consistency \
+NG_SUGAR_REFINEMENT_TIME=medium \
+NG_SUGAR_SQUARE_SIZE=10 \
+./run_nextgen.sh sugar retail_competition_160
+```
+
+Important outputs are collected under:
+
+```text
+08_mesh/sugar/final/
+├── sugar_surface_mesh.ply
+├── sugar_refined_gaussians.ply
+├── sugar_textured_mesh.zip
+└── textured/                 # OBJ + MTL + UV texture files
+```
+
+`dn_consistency` is the default because current SuGaR documentation recommends
+it for mesh quality. `high_poly` is used, and `medium` refinement is the default
+for this integration. Change `NG_SUGAR_REFINEMENT_TIME` to `short` or `long` if
+needed.
+
+Once both Docker images are built, all three products can be generated with:
+
+```bash
+NG_GS_ITERS=30000 \
+NG_DOCKER_MEMORY=100g \
+NG_DOCKER_MEMORY_SWAP=100g \
+NG_GPU_MEMORY_FRACTION=0.88 \
+./run_nextgen.sh mesh-all retail_competition_160
+```
+
+`mesh-all` first creates the truth/presentation meshes in the normal NextGen
+image, then runs SuGaR in its isolated image. Existing VGGT, SfM, fused geometry,
+3DGS and renders are reused; none of those expensive stages are rerun.
 
 ### Full-resolution 3DGS with CPU camera offload
 

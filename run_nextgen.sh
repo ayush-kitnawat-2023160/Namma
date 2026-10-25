@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="${NAMMA_NEXTGEN_IMAGE:-namma-nextgen:latest}"
+SUGAR_IMAGE="${NAMMA_SUGAR_IMAGE:-namma-sugar:latest}"
 CMD="${1:-help}"
 VIEWER_NAME="${NAMMA_NEXTGEN_VIEWER_NAME:-namma-nextgen-viewer}"
 VIEWER_PORT="${NG_VIEWER_PORT:-8080}"
@@ -23,6 +24,74 @@ else
 fi
 MEM_LIMIT="${NG_DOCKER_MEMORY:-${SAFE_MEM_GB}g}"
 SWAP_LIMIT="${NG_DOCKER_MEMORY_SWAP:-$MEM_LIMIT}"
+
+if [[ "$CMD" == "mesh-all" ]]; then
+  [[ $# -ge 2 ]] || { echo "Usage: ./run_nextgen.sh mesh-all <scene>" >&2; exit 2; }
+  SCENE="$2"
+  "$0" mesh "$SCENE"
+  "$0" sugar "$SCENE"
+  echo
+  echo "=== ALL THREE MESH PRODUCTS COMPLETE ==="
+  echo "Truth:        outputs/nextgen/$SCENE/08_mesh/truth/truth_tsdf.ply"
+  echo "Presentation: outputs/nextgen/$SCENE/08_mesh/presentation/presentation_mesh.glb"
+  echo "SuGaR:        outputs/nextgen/$SCENE/08_mesh/sugar/final/"
+  exit 0
+fi
+
+if [[ "$CMD" == "sugar" ]]; then
+  [[ $# -ge 2 ]] || { echo "Usage: ./run_nextgen.sh sugar <scene>" >&2; exit 2; }
+  SCENE="$2"
+  SCENE_ROOT="$ROOT/outputs/nextgen/$SCENE"
+  [[ -d "$SCENE_ROOT/05_gs_dataset" ]] || { echo "ERROR: GS dataset missing: $SCENE_ROOT/05_gs_dataset" >&2; exit 2; }
+  [[ -d "$SCENE_ROOT/06_gs_model" ]] || { echo "ERROR: GS model missing: $SCENE_ROOT/06_gs_model" >&2; exit 2; }
+  docker image inspect "$SUGAR_IMAGE" >/dev/null 2>&1 || {
+    echo "ERROR: SuGaR image '$SUGAR_IMAGE' is not built." >&2
+    echo "Build it first with: ./build_sugar.sh" >&2
+    exit 2
+  }
+
+  OUT="$SCENE_ROOT/08_mesh/sugar"
+  TMP="${OUT}.tmp.$$"
+  rm -rf "$TMP"
+  mkdir -p "$TMP"
+
+  SUGAR_ENV=(
+    -e "HOST_UID=$(id -u)"
+    -e "HOST_GID=$(id -g)"
+    -e "NG_GS_ITERS=${NG_GS_ITERS:-30000}"
+    -e "NG_GPU_MEMORY_FRACTION=${NG_GPU_MEMORY_FRACTION:-0.88}"
+    -e "NG_SUGAR_REGULARIZATION=${NG_SUGAR_REGULARIZATION:-dn_consistency}"
+    -e "NG_SUGAR_REFINEMENT_TIME=${NG_SUGAR_REFINEMENT_TIME:-medium}"
+    -e "NG_SUGAR_SQUARE_SIZE=${NG_SUGAR_SQUARE_SIZE:-10}"
+    -e "NG_SUGAR_POSTPROCESS=${NG_SUGAR_POSTPROCESS:-False}"
+    -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
+  )
+
+  echo "[nextgen:sugar] container safety: memory=$MEM_LIMIT, swap=$SWAP_LIMIT, image=$SUGAR_IMAGE" >&2
+  set +e
+  docker run --rm --init --gpus all \
+    --memory="$MEM_LIMIT" \
+    --memory-swap="$SWAP_LIMIT" \
+    --shm-size="${NG_DOCKER_SHM:-8g}" \
+    --pids-limit="${NG_DOCKER_PIDS:-4096}" \
+    --security-opt no-new-privileges \
+    "${SUGAR_ENV[@]}" \
+    -v "$ROOT/outputs:/workspace/outputs" \
+    -v "$ROOT/nextgen/scripts:/opt/namma-nextgen/scripts:ro" \
+    -v "$TMP:/opt/SuGaR/output" \
+    --entrypoint /bin/bash \
+    "$SUGAR_IMAGE" -lc "/opt/namma-nextgen/scripts/sugar_mesh.sh '$SCENE'"
+  status=$?
+  set -e
+  if (( status != 0 )); then
+    echo "ERROR: SuGaR failed; temporary output kept for inspection: $TMP" >&2
+    exit "$status"
+  fi
+  rm -rf "$OUT"
+  mv "$TMP" "$OUT"
+  echo "Persistent SuGaR output: $OUT"
+  exit 0
+fi
 
 if [[ "$CMD" == "viewer-stop" ]]; then
   if docker ps -a --format '{{.Names}}' | grep -Fxq "$VIEWER_NAME"; then
@@ -75,7 +144,7 @@ if [[ "$CMD" == "viewer" || "$CMD" == "viewer-bg" ]]; then
 fi
 
 case "$CMD" in
-  pipeline|vggt|sfm|fuse|gs-dataset|train|render)
+  pipeline|vggt|sfm|fuse|gs-dataset|train|render|mesh|mesh-truth|mesh-pretty)
     MIN_DISK_GB="${NG_MIN_FREE_DISK_GB:-25}"
     FREE_DISK_KB="$(df -Pk "$ROOT" | awk 'NR==2 {print $4}')"
     FREE_DISK_GB=$(( FREE_DISK_KB / 1024 / 1024 ))
@@ -117,13 +186,17 @@ for name in \
   NG_DEPTH_WEIGHT_INIT NG_DEPTH_WEIGHT_FINAL NG_GPU_MEMORY_FRACTION NG_MIN_FREE_VRAM_GB \
   NG_MAX_GPU_TEMP_C NG_FUSION_NEIGHBORS NG_FUSION_REL_DEPTH NG_FUSION_MIN_SUPPORT \
   NG_FUSION_PIXEL_STRIDE NG_FUSION_CONFIDENCE_PERCENTILE NG_FUSION_VOXEL_SIZE \
-  NG_FUSION_MAX_POINTS
+  NG_FUSION_MAX_POINTS NG_TSDF_NEIGHBORS NG_TSDF_REL_DEPTH NG_TSDF_MIN_SUPPORT \
+  NG_TSDF_CONFIDENCE_PERCENTILE NG_TSDF_VOXEL_SCALE NG_TSDF_TRUNC_VOXELS \
+  NG_TSDF_DEPTH_PERCENTILE NG_TSDF_MIN_COMPONENT_TRIANGLES NG_TSDF_MIN_COMPONENT_FRACTION \
+  NG_TSDF_SAVE_SUPPORT_MASKS NG_PRESENTATION_CONFIDENCE_PERCENTILE \
+  NG_PRESENTATION_DEPTH_TOLERANCE NG_PRESENTATION_TARGET_TRIANGLES NG_PRESENTATION_CHUNK_SIZE
 do
   [[ -n "${!name:-}" ]] && COMMON+=( -e "$name=${!name}" )
 done
 
 case "$CMD" in
-  help|-h|--help|inspect|fix-perms|shell|bash|fuse|viewer|viewer-bg) GPU_ARGS=() ;;
+  help|-h|--help|inspect|fix-perms|shell|bash|fuse|mesh|mesh-truth|mesh-pretty|viewer|viewer-bg) GPU_ARGS=() ;;
   check) GPU_ARGS=(--gpus all) ;;
   prepare)
     if [[ -n "${NG_CAMERA_PROFILE:-}" ]]; then GPU_ARGS=(); else GPU_ARGS=(--gpus all); fi

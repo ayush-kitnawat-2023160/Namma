@@ -17,6 +17,11 @@ Commands:
   gs-dataset <scene>                 Build depth-regularized Graphdeco dataset
   train <scene>                      Train depth-regularized 3DGS
   render <scene>                     Render trained views
+  mesh-truth <scene>                 Cross-view-verified TSDF geometry mesh
+  mesh-pretty <scene>                Same TSDF geometry with multiview 4K colors
+  mesh <scene>                       Build truth + presentation meshes
+  sugar <scene>                      Host wrapper: SuGaR mesh from trained 3DGS
+  mesh-all <scene>                   Host wrapper: truth + presentation + SuGaR
   viewer <scene>                     Serve interactive Gaussian viewer
   viewer-bg <scene>                  Start viewer in background (host wrapper)
   viewer-logs                        Follow background viewer logs (host wrapper)
@@ -46,6 +51,15 @@ Important environment variables:
   NG_GS_ITERS=15000
   NG_GS_RESOLUTION=1
   NG_GS_DATA_DEVICE=cpu|cuda
+  NG_TSDF_NEIGHBORS=8
+  NG_TSDF_REL_DEPTH=0.03
+  NG_TSDF_MIN_SUPPORT=2
+  NG_TSDF_VOXEL_SCALE=1.0
+  NG_TSDF_TRUNC_VOXELS=5.0
+  NG_PRESENTATION_TARGET_TRIANGLES=1000000
+  NG_SUGAR_REGULARIZATION=dn_consistency
+  NG_SUGAR_REFINEMENT_TIME=medium
+  NG_SUGAR_SQUARE_SIZE=10
 EOF
 }
 
@@ -107,6 +121,18 @@ case "${1:-help}" in
   render)
     shift
     exec /opt/namma-nextgen/scripts/render_gs.sh "$@"
+    ;;
+  mesh-truth)
+    shift
+    exec /opt/namma-nextgen/scripts/mesh_truth.sh "$@"
+    ;;
+  mesh-pretty)
+    shift
+    exec /opt/namma-nextgen/scripts/mesh_presentation.sh "$@"
+    ;;
+  mesh)
+    shift
+    exec /opt/namma-nextgen/scripts/mesh_all.sh "$@"
     ;;
   viewer)
     [[ -d /srv/viewer ]] || { echo "ERROR: viewer bundle is not mounted" >&2; exit 2; }
