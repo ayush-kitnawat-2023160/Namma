@@ -66,15 +66,43 @@ def main() -> None:
     parser.add_argument("--mode", choices=["balanced", "max_size"], default="max_size")
     parser.add_argument("--confidence-percentile", type=float, default=20.0)
     parser.add_argument("--max-points", type=int, default=1_000_000)
+    parser.add_argument("--gpu-memory-fraction", type=float, default=0.90)
+    parser.add_argument("--gpu-headroom-gb", type=float, default=1.5)
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
         raise RuntimeError("VGGT-Omega stage requires CUDA.")
+    if not 0.20 <= args.gpu_memory_fraction <= 0.98:
+        raise RuntimeError(f"Invalid --gpu-memory-fraction={args.gpu_memory_fraction}")
+    torch.cuda.set_per_process_memory_fraction(args.gpu_memory_fraction, device=0)
     image_paths = sorted(
         p for p in args.images.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg"}
     )
     if not image_paths:
         raise RuntimeError(f"No input images found in {args.images}")
+
+    free_bytes, total_bytes = torch.cuda.mem_get_info(0)
+    free_gb = free_bytes / (1024 ** 3)
+    total_gb = total_bytes / (1024 ** 3)
+    # Conservative planning model based on published VGGT-Omega max-size memory
+    # measurements: ~9.7 GiB/50 frames, 13.4/100, 20.8/200.  This is only a
+    # guardrail; the allocator fraction below is the hard process-side cap.
+    estimated_gb = 5.95 + 0.0745 * len(image_paths)
+    budget_gb = min(
+        total_gb * args.gpu_memory_fraction,
+        max(0.0, free_gb - args.gpu_headroom_gb),
+    )
+    print(
+        f"GPU planning: {len(image_paths)} views, estimated~{estimated_gb:.1f} GiB, "
+        f"safe budget~{budget_gb:.1f} GiB (free {free_gb:.1f}/{total_gb:.1f} GiB)"
+    )
+    if estimated_gb > budget_gb:
+        safe_views = max(1, int((budget_gb - 5.95) / 0.0745))
+        raise RuntimeError(
+            f"Refusing risky VGGT-Omega run: {len(image_paths)} views are estimated to need "
+            f"~{estimated_gb:.1f} GiB, above the {budget_gb:.1f} GiB safety budget. "
+            f"Re-run prepare with NG_TARGET_VIEWS<={safe_views} or free more VRAM."
+        )
 
     with Image.open(image_paths[0]) as first:
         original_size = first.size
@@ -92,8 +120,10 @@ def main() -> None:
     args.output.mkdir(parents=True, exist_ok=True)
     depth_dir = args.output / "depths"
     conf_dir = args.output / "confidence"
+    model_image_dir = args.output / "model_images"
     depth_dir.mkdir(exist_ok=True)
     conf_dir.mkdir(exist_ok=True)
+    model_image_dir.mkdir(exist_ok=True)
 
     print(f"Loading {len(image_paths)} selected views...")
     images = load_and_preprocess_images(
@@ -164,6 +194,14 @@ def main() -> None:
         colors = pred_images
     colors = np.clip(colors * 255.0, 0, 255).astype(np.uint8)
 
+    for idx, path in enumerate(image_paths):
+        # Keep the exact pixel-aligned image used by VGGT-Omega.  Later geometry
+        # fusion must not guess how max_size preprocessing resized/cropped RGB.
+        cv2.imwrite(
+            str(model_image_dir / f"{path.stem}.png"),
+            cv2.cvtColor(colors[idx], cv2.COLOR_RGB2BGR),
+        )
+
     xyz = world_points.reshape(-1, 3)
     rgb = colors.reshape(-1, 3)
     conf = confidence_scalar.reshape(-1)
@@ -195,6 +233,7 @@ def main() -> None:
         "image_resolution": args.resolution,
         "inverse_depth_encode_scale": encode_scale,
         "confidence_percentile": args.confidence_percentile,
+        "gpu_memory_fraction": args.gpu_memory_fraction,
         "pointcloud_points": int(len(xyz)),
         "camera_centers": camera_centers,
     }

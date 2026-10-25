@@ -54,7 +54,7 @@ trap fail ERR
 
 echo "Scene: $SCENE"
 echo "Video: $VIDEO"
-echo "Views: ${NG_TARGET_VIEWS:-120}"
+echo "Views: ${NG_TARGET_VIEWS:-160}"
 echo "Camera profile: ${NG_CAMERA_PROFILE:-<unknown>}"
 
 stage "calibration/undistortion + frame selection"
@@ -69,7 +69,11 @@ stage "SuperPoint + LightGlue + COLMAP bundle adjustment"
 /opt/namma-nextgen/scripts/sfm.sh "$SCENE"
 done_stage
 
-stage "VGGT/COLMAP fusion + depth priors"
+stage "multi-view depth verification + surface fusion"
+/opt/namma-nextgen/scripts/fuse_geometry.sh "$SCENE"
+done_stage
+
+stage "surface/COLMAP fusion + depth priors"
 /opt/namma-nextgen/scripts/build_gs_dataset.sh "$SCENE"
 done_stage
 
@@ -86,7 +90,7 @@ echo
 echo "============================================================"
 echo " NEXTGEN COMPLETE"
 echo "============================================================"
-echo "Final PLY: /workspace/outputs/nextgen/$SCENE/05_gs_model/point_cloud/iteration_${NG_GS_ITERS:-15000}/point_cloud.ply"
+echo "Final PLY: /workspace/outputs/nextgen/$SCENE/06_gs_model/point_cloud/iteration_${NG_GS_ITERS:-15000}/point_cloud.ply"
 echo "Total time: $(format_time $((END-START)))"
 
 if [[ -n "${HOST_UID:-}" && -n "${HOST_GID:-}" ]]; then

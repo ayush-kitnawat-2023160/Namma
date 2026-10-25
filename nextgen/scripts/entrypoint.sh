@@ -13,6 +13,7 @@ Commands:
   prepare <video> [scene]            Calibrate/undistort + select useful views
   vggt <scene>                       VGGT-Omega camera/depth inference
   sfm <scene>                        SuperPoint + LightGlue + COLMAP/BA
+  fuse <scene>                       Multi-view depth verification + surface fusion
   gs-dataset <scene>                 Build depth-regularized Graphdeco dataset
   train <scene>                      Train depth-regularized 3DGS
   render <scene>                     Render trained views
@@ -24,13 +25,20 @@ Important environment variables:
   NG_CAMERA_PROFILE=advio15
   NG_CALIB_VIEWS=20
   NG_CALIB_MODEL=radial
-  NG_TARGET_VIEWS=120
+  NG_TARGET_VIEWS=160
   NG_MAX_CANDIDATES=1200
   NG_VGGT_CHECKPOINT=/workspace/checkpoints/VGGT-Omega-1B-512.pt
   NG_VGGT_RESOLUTION=512
   NG_VGGT_MODE=max_size
   NG_TEMPORAL_WINDOW=5
-  NG_VISUAL_NEIGHBORS=5
+  NG_VISUAL_NEIGHBORS=8
+  NG_GPU_MEMORY_FRACTION=0.90
+  NG_MIN_FREE_VRAM_GB=18
+  NG_MAX_GPU_TEMP_C=82
+  NG_FUSION_NEIGHBORS=6
+  NG_FUSION_REL_DEPTH=0.04
+  NG_FUSION_MIN_SUPPORT=1
+  NG_FUSION_PIXEL_STRIDE=3
   NG_GS_ITERS=15000
   NG_GS_RESOLUTION=1
 EOF
@@ -78,6 +86,10 @@ case "${1:-help}" in
   sfm)
     shift
     exec /opt/namma-nextgen/scripts/sfm.sh "$@"
+    ;;
+  fuse)
+    shift
+    exec /opt/namma-nextgen/scripts/fuse_geometry.sh "$@"
     ;;
   gs-dataset)
     shift

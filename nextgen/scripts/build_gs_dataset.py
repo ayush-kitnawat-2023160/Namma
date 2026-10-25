@@ -68,6 +68,14 @@ def transform_dense_ply(source_ply: Path, target_ply: Path, scale: float, R: np.
     xyz = np.stack([vertex["x"], vertex["y"], vertex["z"]], axis=1).astype(np.float64)
     transformed = (scale * (R @ xyz.T)).T + t
     colors = np.stack([vertex["red"], vertex["green"], vertex["blue"]], axis=1).astype(np.uint8)
+    names = set(vertex.data.dtype.names or ())
+    if {"nx", "ny", "nz"}.issubset(names):
+        normals = np.stack([vertex["nx"], vertex["ny"], vertex["nz"]], axis=1).astype(np.float64)
+        normals = (R @ normals.T).T
+        lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+        normals = np.divide(normals, np.maximum(lengths, 1e-12), out=np.zeros_like(normals), where=lengths > 1e-12)
+    else:
+        normals = np.zeros_like(transformed, dtype=np.float64)
 
     dtype = [
         ("x", "f4"), ("y", "f4"), ("z", "f4"),
@@ -75,9 +83,8 @@ def transform_dense_ply(source_ply: Path, target_ply: Path, scale: float, R: np.
         ("red", "u1"), ("green", "u1"), ("blue", "u1"),
     ]
     output = np.empty(len(transformed), dtype=dtype)
-    normals = np.zeros_like(transformed, dtype=np.float32)
     attrs = np.concatenate(
-        [transformed.astype(np.float32), normals, colors.astype(np.uint8)], axis=1
+        [transformed.astype(np.float32), normals.astype(np.float32), colors.astype(np.uint8)], axis=1
     )
     output[:] = list(map(tuple, attrs))
     PlyData([PlyElement.describe(output, "vertex")], text=False).write(target_ply)
@@ -89,6 +96,7 @@ def main() -> None:
     parser.add_argument("--frames", type=Path, required=True)
     parser.add_argument("--vggt", type=Path, required=True)
     parser.add_argument("--sfm", type=Path, required=True)
+    parser.add_argument("--geometry", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
@@ -131,16 +139,27 @@ def main() -> None:
         for image in reconstruction.images.values()
     }
     common = sorted(set(omega_by_name) & set(colmap_by_name))
-    alignment_report = {"common_cameras": len(common), "used_dense_vggt_initialization": False}
+    geometry_source = args.vggt / "pointcloud.ply"
+    geometry_kind = "raw_vggt"
+    if args.geometry and (args.geometry / "surface.ply").is_file():
+        geometry_source = args.geometry / "surface.ply"
+        geometry_kind = "cross_view_fused_surface"
 
-    if len(common) >= 3 and (args.vggt / "pointcloud.ply").is_file():
+    alignment_report = {
+        "common_cameras": len(common),
+        "used_dense_vggt_initialization": False,
+        "geometry_source": geometry_kind,
+        "geometry_file": str(geometry_source),
+    }
+
+    if len(common) >= 3 and geometry_source.is_file():
         source = np.stack([omega_by_name[name] for name in common])
         target = np.stack([colmap_by_name[name] for name in common])
         scale, rotation, translation = estimate_similarity(source, target)
         aligned_centers = (scale * (rotation @ source.T)).T + translation
         rms = float(np.sqrt(np.mean(np.sum((aligned_centers - target) ** 2, axis=1))))
         point_count = transform_dense_ply(
-            args.vggt / "pointcloud.ply",
+            geometry_source,
             sparse_out / "points3D.ply",
             scale,
             rotation,
@@ -156,7 +175,10 @@ def main() -> None:
                 "dense_points": point_count,
             }
         )
-        print(f"Aligned VGGT dense geometry to COLMAP with {len(common)} cameras; RMS={rms:.6f}")
+        print(
+            f"Aligned {geometry_kind} geometry to COLMAP with {len(common)} cameras; "
+            f"RMS={rms:.6f}"
+        )
     else:
         print("[WARN] Could not align VGGT dense point cloud; Graphdeco will initialize from COLMAP sparse points.")
 

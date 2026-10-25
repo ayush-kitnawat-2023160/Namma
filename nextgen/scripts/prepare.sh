@@ -22,7 +22,7 @@ CALIB_OUT="/workspace/outputs/nextgen/$SCENE/00_calibration"
 ARGS=(
   --video "$VIDEO"
   --output "$OUT"
-  --target-views "${NG_TARGET_VIEWS:-120}"
+  --target-views "${NG_TARGET_VIEWS:-160}"
   --max-candidates "${NG_MAX_CANDIDATES:-1200}"
   --min-blur "${NG_MIN_BLUR:-20}"
   --duplicate-distance "${NG_DUPLICATE_DISTANCE:-0.025}"

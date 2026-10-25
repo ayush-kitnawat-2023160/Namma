@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import cv2
+import h5py
 import numpy as np
 import pycolmap
 import yaml
@@ -22,15 +23,50 @@ def image_descriptor(path: Path) -> np.ndarray:
     return small.reshape(-1)
 
 
-def build_pairs(names: list[str], image_dir: Path, temporal_window: int, visual_neighbors: int):
+def feature_global_descriptor(features: h5py.File, name: str) -> np.ndarray | None:
+    if name not in features or "descriptors" not in features[name]:
+        return None
+    local = np.asarray(features[name]["descriptors"], dtype=np.float32)
+    if local.ndim != 2 or min(local.shape) == 0:
+        return None
+    # SuperPoint descriptors are 256-D. HLoc normally stores D x N, but
+    # tolerate N x D and low-feature images where N can be < D.
+    if local.shape[0] == 256:
+        pooled = local.mean(axis=1)
+    elif local.shape[1] == 256:
+        pooled = local.mean(axis=0)
+    else:
+        pooled = local.mean(axis=1 if local.shape[0] < local.shape[1] else 0)
+    norm = float(np.linalg.norm(pooled))
+    return pooled / max(norm, 1e-8)
+
+
+def build_pairs(
+    names: list[str],
+    image_dir: Path,
+    temporal_window: int,
+    visual_neighbors: int,
+    feature_path: Path | None = None,
+):
     pairs: set[tuple[str, str]] = set()
     n = len(names)
     for i in range(n):
         for j in range(i + 1, min(n, i + temporal_window + 1)):
             pairs.add((names[i], names[j]))
 
+    retrieval_source = "grayscale_fallback"
     if visual_neighbors > 0 and n > temporal_window + 2:
-        descriptors = np.stack([image_descriptor(image_dir / name) for name in names])
+        descriptors = None
+        if feature_path and feature_path.is_file():
+            with h5py.File(feature_path, "r") as handle:
+                pooled = [feature_global_descriptor(handle, name) for name in names]
+            if all(value is not None for value in pooled):
+                widths = {len(value) for value in pooled if value is not None}
+                if len(widths) == 1:
+                    descriptors = np.stack(pooled)
+                    retrieval_source = "pooled_superpoint"
+        if descriptors is None:
+            descriptors = np.stack([image_descriptor(image_dir / name) for name in names])
         descriptors /= np.linalg.norm(descriptors, axis=1, keepdims=True) + 1e-8
         similarity = descriptors @ descriptors.T
         np.fill_diagonal(similarity, -np.inf)
@@ -44,7 +80,7 @@ def build_pairs(names: list[str], image_dir: Path, temporal_window: int, visual_
                     continue
                 a, b = sorted((i, int(j)))
                 pairs.add((names[a], names[b]))
-    return sorted(pairs)
+    return sorted(pairs), retrieval_source
 
 
 def read_camera(path: Path):
@@ -183,11 +219,6 @@ def main() -> None:
     if len(names) < 3:
         raise RuntimeError("Need at least three selected views for SfM.")
 
-    pairs = build_pairs(names, args.images, args.temporal_window, args.visual_neighbors)
-    pairs_path = args.output / "pairs.txt"
-    pairs_path.write_text("".join(f"{a} {b}\n" for a, b in pairs))
-    print(f"Pair graph: {len(names)} images, {len(pairs)} candidate pairs")
-
     features = args.output / "features.h5"
     matches = args.output / "matches.h5"
     feature_conf = extract_features.confs["superpoint_max"]
@@ -198,6 +229,19 @@ def main() -> None:
         args.images,
         image_list=names,
         feature_path=features,
+    )
+    pairs, retrieval_source = build_pairs(
+        names,
+        args.images,
+        args.temporal_window,
+        args.visual_neighbors,
+        feature_path=features,
+    )
+    pairs_path = args.output / "pairs.txt"
+    pairs_path.write_text("".join(f"{a} {b}\n" for a, b in pairs))
+    print(
+        f"Pair graph: {len(names)} images, {len(pairs)} candidate pairs; "
+        f"global retrieval={retrieval_source}"
     )
     match_features.main(
         matcher_conf,
@@ -251,6 +295,7 @@ def main() -> None:
         "registered_images": num_registered,
         "registration_fraction": num_registered / len(names),
         "pairs": len(pairs),
+        "global_pair_retrieval": retrieval_source,
         "points3D": int(model.num_points3D()),
         "known_intrinsics": bool(known),
         "pose_initialization": "VGGT-Omega",

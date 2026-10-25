@@ -4,13 +4,16 @@ set -Eeuo pipefail
 [[ $# -ge 1 ]] || { echo "Usage: render <scene>" >&2; exit 2; }
 SCENE="$1"
 ROOT="/workspace/outputs/nextgen/$SCENE"
-MODEL="$ROOT/05_gs_model"
-OUT="$ROOT/06_renders"
+MODEL="$ROOT/06_gs_model"
+OUT="$ROOT/07_renders"
 ITERS="${NG_GS_ITERS:-15000}"
 
 [[ -d "$MODEL" ]] || { echo "ERROR: model missing: $MODEL" >&2; exit 2; }
 cd /opt/gaussian-splatting
-python render.py \
+python /opt/namma-nextgen/scripts/gpu_guard.py --stage 3dgs-render --min-free-gb "${NG_MIN_FREE_VRAM_GB:-18}"
+python /opt/namma-nextgen/scripts/torch_limited_exec.py \
+  --fraction "${NG_GPU_MEMORY_FRACTION:-0.90}" \
+  render.py \
   -m "$MODEL" \
   --iteration "$ITERS" \
   --skip_test \

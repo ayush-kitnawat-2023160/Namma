@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -21,6 +22,8 @@ def check(module: str) -> None:
 print("=== Namma NextGen preflight ===")
 print("Python:", sys.version.split()[0])
 print("PyTorch:", torch.__version__, "CUDA build:", torch.version.cuda)
+print("GPU memory fraction:", os.environ.get("NG_GPU_MEMORY_FRACTION", "0.90"))
+print("Minimum free VRAM:", os.environ.get("NG_MIN_FREE_VRAM_GB", "18"), "GiB")
 
 for name in [
     "cv2",
