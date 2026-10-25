@@ -123,6 +123,36 @@ Useful individual commands:
 ./run_nextgen.sh render <scene>
 ```
 
+### Full-resolution 3DGS with CPU camera offload
+
+Graphdeco normally keeps every training image, mask and inverse-depth map on the
+CUDA device. This can exhaust a 24 GiB GPU before optimization starts for a
+large set of native 4K views. Set `NG_GS_DATA_DEVICE=cpu` to retain those camera
+tensors in system RAM while Graphdeco copies only the sampled camera tensors to
+CUDA during each training iteration. This does **not** lower image resolution or
+split training into disjoint camera batches; all cameras remain available to the
+normal random-view training loop.
+
+For example, on a workstation with 128 GB system RAM and an RTX 3090, a guarded
+full-resolution run can be launched with:
+
+```bash
+NG_DOCKER_MEMORY=100g \
+NG_DOCKER_MEMORY_SWAP=100g \
+NG_GS_ITERS=30000 \
+NG_GS_RESOLUTION=1 \
+NG_GS_DATA_DEVICE=cpu \
+NG_GPU_MEMORY_FRACTION=0.88 \
+./run_nextgen.sh train retail_competition_160
+```
+
+`NG_DOCKER_MEMORY=100g` is a hard container memory ceiling. Keeping
+`NG_DOCKER_MEMORY_SWAP` equal to it prevents the container from gaining an
+additional swap allowance. `NG_GPU_MEMORY_FRACTION` independently caps the
+PyTorch CUDA allocator, so CPU RAM and VRAM remain bounded separately.
+
+The default remains `NG_GS_DATA_DEVICE=cuda` for smaller datasets.
+
 ## Interactive localhost viewer
 
 NextGen includes a self-contained browser viewer for the trained Graphdeco

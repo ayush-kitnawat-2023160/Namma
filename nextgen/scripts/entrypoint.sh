@@ -45,6 +45,7 @@ Important environment variables:
   NG_FUSION_PIXEL_STRIDE=3
   NG_GS_ITERS=15000
   NG_GS_RESOLUTION=1
+  NG_GS_DATA_DEVICE=cpu|cuda
 EOF
 }
 

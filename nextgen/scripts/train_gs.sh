@@ -8,8 +8,17 @@ DATASET="$ROOT/05_gs_dataset"
 MODEL="$ROOT/06_gs_model"
 ITERS="${NG_GS_ITERS:-15000}"
 RESOLUTION="${NG_GS_RESOLUTION:-1}"
+DATA_DEVICE="${NG_GS_DATA_DEVICE:-cuda}"
 DEPTH_INIT="${NG_DEPTH_WEIGHT_INIT:-1.0}"
 DEPTH_FINAL="${NG_DEPTH_WEIGHT_FINAL:-0.01}"
+
+case "$DATA_DEVICE" in
+  cpu|cuda) ;;
+  *)
+    echo "ERROR: NG_GS_DATA_DEVICE must be 'cpu' or 'cuda' (got: $DATA_DEVICE)" >&2
+    exit 2
+    ;;
+esac
 
 [[ -d "$DATASET/images" ]] || { echo "ERROR: GS dataset missing: $DATASET" >&2; exit 2; }
 [[ -f "$DATASET/sparse/0/depth_params.json" ]] || { echo "ERROR: depth_params.json missing" >&2; exit 2; }
@@ -19,6 +28,8 @@ mkdir -p "$TMP_MODEL" /workspace/outputs/logs
 trap 'rm -rf "$TMP_MODEL"' EXIT
 
 python /opt/namma-nextgen/scripts/gpu_guard.py --stage 3dgs-train --min-free-gb "${NG_MIN_FREE_VRAM_GB:-18}"
+
+echo "3DGS training: iterations=$ITERS, resolution=$RESOLUTION, camera_data_device=$DATA_DEVICE"
 
 cd /opt/gaussian-splatting
 set +e
@@ -31,6 +42,7 @@ python /opt/namma-nextgen/scripts/torch_limited_exec.py \
   --iterations "$ITERS" \
   --save_iterations "$ITERS" \
   --resolution "$RESOLUTION" \
+  --data_device "$DATA_DEVICE" \
   --depth_l1_weight_init "$DEPTH_INIT" \
   --depth_l1_weight_final "$DEPTH_FINAL" \
   --antialiasing \
