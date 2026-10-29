@@ -1,0 +1,145 @@
+diff --git a/lib/three/SphrRuntime.ts b/lib/three/SphrRuntime.ts
+index 3ea7b75..f85edfd 100644
+--- a/lib/three/SphrRuntime.ts
++++ b/lib/three/SphrRuntime.ts
+@@ -1611,6 +1611,36 @@ export class SphrRuntime {
+     if (this.disposed) return;
+     this.xrFacing = null;
+     const direction = this.camera.getWorldDirection(new THREE.Vector3());
++    const outgoingNode = this.currentNode;
++    const transitionVideo = outgoingNode && !fromOverview && !this.immersive
++      ? this.bootstrap.space.space_data.navigationTransition?.videoByEdge?.[`${outgoingNode.uuid}__${node.uuid}`]
++      : undefined;
++    if (transitionVideo && outgoingNode && this.panorama) {
++      this.nav?.beginTransition();
++      try {
++        await this.panorama.playTransitionVideo(transitionVideo, outgoingNode);
++        if (this.disposed) return;
++        this.currentNode = node;
++        this.panorama.navigate(node, 1, { replaceImmediately: true });
++        this.panorama.setVisible(true);
++        this.state.viewMode = "FPV";
++        this.updateControlsForViewMode();
++        this.sceneGraph?.setViewMode("FPV", this.state.debug);
++        this.nav?.setOrbit(false);
++        this.nav?.setActive(node.uuid);
++        const pose = this.poseForNode(node, "FPV");
++        pose.target.copy(pose.position).addScaledVector(direction, 0.1);
++        pose.fov = this.camera.fov;
++        this.setCameraPose(pose, true);
++        this.endNavigationTransition();
++        this.audio.play("navigate");
++        this.emitState();
++        this.prefetchNeighbors(node);
++        return;
++      } catch (error) {
++        console.warn("PanSplat navigation video failed; falling back to the normal panorama transition", error);
++      }
++    }
+     const transition = fromOverview || this.reconstructionMove() || this.immersive ? null : this.beginNavigationTransition(this.currentNode);
+     const navigationMs = this.immersive ? XR_MOVE_MS : this.navigationMs();
+     this.nav?.beginTransition();
+diff --git a/lib/three/renderers/PanoramaLayer.ts b/lib/three/renderers/PanoramaLayer.ts
+index 60e9dda..9282207 100644
+--- a/lib/three/renderers/PanoramaLayer.ts
++++ b/lib/three/renderers/PanoramaLayer.ts
+@@ -228,6 +228,7 @@ export class PanoramaLayer {
+   private outgoing: PanoObject | null = null;
+   private transitionCapture: PanoObject | null = null;
+   private transitionScene: THREE.Scene | null = null;
++  private videoTransition: { group: THREE.Group; material: THREE.MeshBasicMaterial; texture: THREE.VideoTexture; video: HTMLVideoElement } | null = null;
+   private visible = true;
+   private presentationOpacity = 1;
+   /** How much a reconstruction in front of the photographs hides them. */
+@@ -369,6 +370,7 @@ export class PanoramaLayer {
+   update(camera: THREE.Camera) {
+     this.active?.group.position.copy(camera.position);
+     this.outgoing?.group.position.copy(camera.position);
++    this.videoTransition?.group.position.copy(camera.position);
+     if (!this.fade) return;
+     const progress = this.fadeProgress();
+     this.setOpacity(this.active, progress);
+@@ -413,6 +415,62 @@ export class PanoramaLayer {
+     this.transitionScene = null;
+   }
+ 
++  /** Play a pre-rendered equirectangular transition as a moving panorama. */
++  async playTransitionVideo(url: string, source: NodeData) {
++    this.clearVideoTransition();
++    const video = document.createElement("video");
++    video.src = url;
++    video.crossOrigin = "anonymous";
++    video.preload = "auto";
++    video.muted = true;
++    video.playsInline = true;
++    video.loop = false;
++    await new Promise<void>((resolve, reject) => {
++      const ready = () => { cleanup(); resolve(); };
++      const failed = () => { cleanup(); reject(new Error(`Unable to load transition video ${url}`)); };
++      const cleanup = () => { video.removeEventListener("canplay", ready); video.removeEventListener("error", failed); };
++      video.addEventListener("canplay", ready);
++      video.addEventListener("error", failed);
++      video.load();
++    });
++    if (this.disposed) return;
++    const texture = new THREE.VideoTexture(video);
++    texture.colorSpace = THREE.SRGBColorSpace;
++    texture.minFilter = THREE.LinearFilter;
++    texture.magFilter = THREE.LinearFilter;
++    const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false, toneMapped: false });
++    const sphere = new THREE.Mesh(new THREE.SphereGeometry(100, 64, 40), material);
++    sphere.renderOrder = -5;
++    sphere.rotation.copy(eulerFromLike(source.rotation));
++    const group = new THREE.Group();
++    group.name = `panorama-video-transition-${source.uuid}`;
++    group.add(sphere);
++    this.scene.add(group);
++    this.videoTransition = { group, material, texture, video };
++    await video.play();
++    await new Promise<void>((resolve, reject) => {
++      const ended = () => { cleanup(); resolve(); };
++      const failed = () => { cleanup(); reject(new Error(`Transition video failed while playing ${url}`)); };
++      const cleanup = () => { video.removeEventListener("ended", ended); video.removeEventListener("error", failed); };
++      video.addEventListener("ended", ended);
++      video.addEventListener("error", failed);
++    });
++    this.clearVideoTransition();
++  }
++
++  private clearVideoTransition() {
++    const transition = this.videoTransition;
++    if (!transition) return;
++    transition.video.pause();
++    transition.video.removeAttribute("src");
++    transition.video.load();
++    this.scene.remove(transition.group);
++    transition.texture.dispose();
++    transition.material.dispose();
++    transition.group.traverse((child) => { (child as THREE.Mesh).geometry?.dispose?.(); });
++    this.videoTransition = null;
++  }
++
+   setVisible(visible: boolean) {
+     this.visible = visible;
+     if (this.active) this.active.group.visible = this.shown();
+@@ -446,6 +504,7 @@ export class PanoramaLayer {
+     this.disposed = true;
+     this.fade = null;
+     this.clearTransitionCapture();
++    this.clearVideoTransition();
+     [this.active, this.outgoing].forEach((object) => {
+       if (!object) return;
+       this.scene.remove(object.group);
+diff --git a/lib/types.ts b/lib/types.ts
+index 978875f..76041d7 100644
+--- a/lib/types.ts
++++ b/lib/types.ts
+@@ -252,6 +252,8 @@ export type NavigationTransitionConfig = {
+   meshFadeMs?: number;
+   navigationMs?: number;
+   cubeRenderTargetSize?: number;
++  /** Optional pre-rendered 360 video for a directed panorama edge, keyed as "from__to". */
++  videoByEdge?: Record<string, string>;
+ };
+ 
+ export type SpaceData = {

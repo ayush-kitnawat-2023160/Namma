@@ -211,25 +211,31 @@ panograph/hf_cache/
 panograph/npm_cache/
 ```
 
-## Why PanSplat is not in the mandatory path yet
+## Optional PanSplat transitions
 
-PanSplat (CVPR 2025) remains the intended learned transition upgrade, but its
-official pretrained checkpoints are currently distributed through SharePoint
-links rather than a stable programmatic model registry. The official 4K model
-also states a minimum 24 GB GPU requirement, leaving essentially no safety
-margin on an RTX 3090.
-
-Therefore the reproducible branch first establishes:
+The base tour still works without Gaussian transitions. On the
+`feature/panograph-gs-transitions` branch, PanSplat is isolated in a second
+Docker image and renders directed edge videos offline:
 
 ```text
-RGB panoramas -> PanoVGGT geometry -> graph -> SPHR tour
+PanoGraph edge A--B
+        |
+        v
+PanSplat spherical Gaussians
+        |
+        +--> A__B.webm
+        `--> B__A.webm
 ```
 
-SPHR already provides panorama-to-panorama camera/crossfade navigation. PanSplat
-should be added as an **optional offline transition renderer** after this baseline
-is validated, using its 512x1024 checkpoint by default. It must not be allowed to
-make the base tour dependent on a fragile checkpoint host or a near-100%-VRAM
-4K run.
+Use `./run_pansplat.sh` to build and render them. Re-run the normal `viewer`
+command afterward; it automatically packages any available transition videos
+into SPHR. The patched SPHR runtime plays the equirectangular transition on a
+360 sphere, and falls back to the normal panorama navigation if a clip is
+missing or fails to load.
+
+Start with 512x1024. The released 2048x4096 PanSplat model requires essentially
+an entire 24 GB RTX 3090, so the 4K path is deliberately a later edge-by-edge
+quality pass rather than the default.
 
 ## Upstream versions pinned in the image
 

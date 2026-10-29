@@ -17,6 +17,7 @@ def main() -> None:
         ("02_geometry", root / "02_geometry" / "summary.json", "pairwise PanoVGGT poses"),
         ("03_graph", root / "03_graph" / "graph.json", "PanoGraph nodes/edges"),
         ("04_sphr", root / "04_sphr" / "bootstrap.json", "SPHR viewer package"),
+        ("05_pansplat", root / "05_pansplat" / "summary.json", "offline PanSplat edge transitions"),
     ]
     print(f"PanoGraph scene: {args.scene}")
     for stage, path, description in checks:

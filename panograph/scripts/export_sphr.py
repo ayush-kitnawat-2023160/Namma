@@ -25,6 +25,17 @@ def main() -> None:
     out = root / "04_sphr"
     assets = out / "assets" / "panos"
     assets.mkdir(parents=True, exist_ok=True)
+    transition_src = root / "05_pansplat" / "transitions"
+    transition_assets = out / "assets" / "transitions"
+    if transition_assets.exists():
+        shutil.rmtree(transition_assets)
+    transition_map: dict[str, str] = {}
+    if transition_src.is_dir():
+        transition_assets.mkdir(parents=True, exist_ok=True)
+        for clip in sorted(transition_src.glob("*.webm")):
+            dest = transition_assets / clip.name
+            shutil.copy2(clip, dest)
+            transition_map[clip.stem] = f"/datasets/panograph/{args.scene}/transitions/{clip.name}"
 
     nodes = []
     tourpoints = []
@@ -72,6 +83,7 @@ def main() -> None:
                     "enabled": True,
                     "navigationMs": 850,
                     "meshFadeMs": 300,
+                    **({"videoByEdge": transition_map} if transition_map else {}),
                 },
             },
         },
@@ -102,6 +114,7 @@ def main() -> None:
         "runtime": "SPHR",
         "panorama_nodes": len(nodes),
         "tourpoints": len(tourpoints),
+        "pansplat_transition_videos": len(transition_map),
         "bootstrap": str(out / "bootstrap.json"),
         "viewer_url": f"http://127.0.0.1:3000/?config=/datasets/panograph/{args.scene}/bootstrap.json",
     }

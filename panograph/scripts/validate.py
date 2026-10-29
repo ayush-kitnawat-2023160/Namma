@@ -72,6 +72,17 @@ def main() -> None:
     missing_assets = [node["uuid"] for node in boot_nodes if not (assets / f"{node['uuid']}.webp").is_file()]
     require(not missing_assets, f"Missing panorama assets: {missing_assets}")
 
+    transition_cfg = space.get("navigationTransition", {})
+    transition_map = transition_cfg.get("videoByEdge", {})
+    transition_assets = package / "assets" / "transitions"
+    for edge_key, url in transition_map.items():
+        require("__" in edge_key, f"Invalid PanSplat edge key: {edge_key}")
+        require(
+            str(url).startswith(f"/datasets/panograph/{args.scene}/transitions/"),
+            f"Invalid PanSplat transition URL: {url}",
+        )
+        require((transition_assets / Path(str(url)).name).is_file(), f"Missing PanSplat transition asset: {url}")
+
     geometry_summary = root / "02_geometry" / "summary.json"
     geometry = "PanoVGGT" if geometry_summary.is_file() else "fallback graph (GPU geometry not run/succeeded)"
     report = {
@@ -83,6 +94,7 @@ def main() -> None:
         "graph_edges": len(graph["edges"]),
         "geometry": geometry,
         "viewer_assets": len(list(assets.glob("*.webp"))),
+        "pansplat_transition_videos": len(transition_map),
     }
     (package / "validation.json").write_text(json.dumps(report, indent=2))
     print("=== NAMMA PANOGRAPH: VALIDATION PASSED ===")

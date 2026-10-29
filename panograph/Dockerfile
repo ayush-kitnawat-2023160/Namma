@@ -44,6 +44,8 @@ RUN python3 -m pip install --no-cache-dir \
       "huggingface_hub>=0.27" hf_xet \
       numpy scipy pillow pyyaml psutil
 
+COPY pansplat/sphr-pansplat-transition.patch /tmp/sphr-pansplat-transition.patch
+
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
@@ -52,6 +54,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && git clone https://github.com/lukehollis/sphr.git /opt/sphr \
     && cd /opt/sphr \
     && git checkout "${SPHR_COMMIT}" \
+    && git apply /tmp/sphr-pansplat-transition.patch \
     && npm ci \
     && npm run typecheck \
     && npm run build

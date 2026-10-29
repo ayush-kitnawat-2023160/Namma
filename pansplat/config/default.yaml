@@ -1,0 +1,24 @@
+model:
+  repo: https://github.com/chengzhag/PanSplat.git
+  commit: 05d134b
+  profile: 512
+  checkpoint_512_url: https://monashuni-my.sharepoint.com/:u:/g/personal/cheng_zhang_monash_edu/EUSd23tEyjpIg-A6YMdrV-gBMSHG9hLk5zYC_Aq80csDig?download=1
+  checkpoint_4k_url: https://monashuni-my.sharepoint.com/:u:/g/personal/cheng_zhang_monash_edu/Ee1xYAdyL3xOoGZdyMi4fPMBnq5n-XXQmGZvSrirAhrjGA?download=1
+
+render:
+  frames: 36
+  fps: 30
+  near: 0.45
+  far: 50.0
+  normalize_baseline: true
+  render_batch_512: 4
+  render_batch_4k: 1
+  webm_crf: 30
+
+safety:
+  min_free_vram_mb_512: 12000
+  min_free_vram_mb_4k: 23200
+  gpu_memory_fraction_512: 0.78
+  gpu_memory_fraction_4k: 0.0
+  host_memory_limit: 28g
+  shm_size: 8g
