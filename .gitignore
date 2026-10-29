@@ -26,3 +26,6 @@ pansplat/checkpoints/*
 !pansplat/checkpoints/.gitkeep
 pansplat/cache/*
 !pansplat/cache/.gitkeep
+
+# Local source snapshots; keep outside GitHub and Docker builds.
+backups/

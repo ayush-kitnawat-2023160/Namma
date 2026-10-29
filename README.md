@@ -1,5 +1,7 @@
 # Namma — RGB Video → MASt3R-SLAM → 3D Gaussian Splatting
 
+For the RTX 3090 / 128 GB college server, see the new **[Precision reconstruction workflow](precision/README.md)**. It adds final-camera high-resolution stereo, geometric quality gates, bounded training, and an isolated output tree. Existing MASt3R, NextGen, semantic and panorama commands remain available. Do not run reconstruction or Docker builds on the laptop.
+
 Portable, headless Docker project for the Namma Space Round-1 reconstruction experiment.
 
 ## Host requirements
