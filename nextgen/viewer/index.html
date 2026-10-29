@@ -16,6 +16,31 @@
           <div class="title" id="scene-title">NextGen reconstruction</div>
         </div>
         <div class="top-actions">
+          <a id="gallery-button" class="ghost gallery-link" href="/viewer/">All scenes</a>
+          <label class="viewer-control">
+            <span>Model</span>
+            <select id="model-variant" aria-label="Reconstruction model">
+              <option value="trained">Trained Gaussians</option>
+              <option value="optimized">Optimized Gaussians (SPZ)</option>
+              <option value="cleaned">Cleaned Gaussians</option>
+              <option value="depth-aware">Depth-aware Gaussians</option>
+              <option value="truth">Truth Mesh</option>
+              <option value="truth-raw">Raw Truth Mesh</option>
+              <option value="pretty">Pretty Mesh</option>
+              <option value="sugar">SuGaR Mesh</option>
+              <option value="sugar-repaired">SuGaR Repaired</option>
+              <option value="sugar-enhanced">SuGaR Enhanced</option>
+            </select>
+          </label>
+          <label id="mesh-style-control" class="viewer-control" hidden>
+            <span>Surface</span>
+            <select id="mesh-style" aria-label="Mesh display style">
+              <option value="solid">Solid</option>
+              <option value="color">Color</option>
+              <option value="normals">Normals</option>
+              <option value="wireframe">Wireframe</option>
+            </select>
+          </label>
           <label class="viewer-control">
             <span>SH detail</span>
             <select id="sh-degree" aria-label="Spherical harmonics detail">
@@ -37,17 +62,37 @@
         </div>
       </header>
 
+      <main id="gallery" class="gallery hidden">
+        <header class="gallery-header">
+          <div>
+            <div class="eyebrow">NAMMA · HACKATHON SHOWCASE</div>
+            <h1>Reconstruction gallery</h1>
+            <p>Choose a scene and model. The large 3D asset loads only after you open it.</p>
+          </div>
+          <div class="gallery-tools">
+            <label class="search-box">
+              <span class="sr-only">Filter scenes</span>
+              <input id="scene-search" type="search" placeholder="Find a scene…" autocomplete="off" />
+            </label>
+            <span id="scene-count" class="scene-count">Finding scenes…</span>
+          </div>
+        </header>
+        <div id="scene-grid" class="scene-grid"></div>
+        <div id="gallery-empty" class="gallery-empty hidden">No completed reconstructions were found. Finish training a scene, then reload this page.</div>
+        <div id="gallery-error" class="gallery-empty hidden">Could not reach the local scene catalog. Check that the viewer server is running.</div>
+        <footer class="gallery-footer">Hosted on this computer · scene files stay in the local outputs folder</footer>
+      </main>
+
       <section id="welcome" class="panel welcome">
         <div class="badge">Interactive Gaussian viewer</div>
         <h1 id="welcome-title">Scene ready</h1>
         <p>
-          Inspect the PNG renders instantly, or load the full Gaussian PLY for
-          free 3D orbit/pan/zoom. The PLY can be hundreds of MB, so it is loaded
-          only when you ask for it.
+          Load the optimized Gaussian asset for interactive orbit, pan and zoom.
+          The original PLY remains available from the model menu for comparison.
         </p>
         <div class="meta-grid">
           <div><span>Iteration</span><strong id="iteration-value">—</strong></div>
-          <div><span>PLY</span><strong id="ply-size">checking…</strong></div>
+          <div><span>Selected asset</span><strong id="ply-size">checking…</strong></div>
           <div><span>Renders</span><strong id="render-count">checking…</strong></div>
         </div>
         <div class="welcome-actions">
