@@ -89,6 +89,40 @@ The image build also runs a tiny CPU-only camera/database compatibility check. T
 
 `check` imports dependencies and checks the COLMAP CLI; it does not allocate CUDA memory or prove reconstruction quality. Heavy commands check the selected GPU before exposing only that GPU to the container. Do not run an old runner or another GPU job concurrently: the lock coordinates Precision jobs/builds **within this checkout**, not unrelated jobs on the server.
 
+## Recover a sparse-quality-gate failure
+
+If the first run stopped at `Sparse quality gates failed` after writing `03_sfm/model`, keep that scene. A disconnected **stereo** neighbor graph does not by itself prove the **camera pose** graph is disconnected: turns and small-baseline views can connect poses but make poor stereo sources. The corrected gate measures these separately and uses all reliable sparse tracks for pair-angle evidence instead of a global strided sample. Reprojection, observation, parallax, geometric stereo and resource protections remain enabled.
+
+This recovery update changes scripts only. Commit/push it on the laptop, then `git pull --ff-only` on the server; **no image rebuild is required** because scripts are mounted read-only into the existing image. The supplied `precision_build.log` confirmed the original server image build succeeded. A CPU-only diagnostic can inspect the saved model:
+
+```bash
+export NAMMA_SERVER=1
+export NG_GPU_DEVICE=0
+PR_ALLOW_VIEW_PRUNING=1 ./run_precision.sh audit precision_v1
+```
+
+It prints a report and saves a timestamped `outputs/precision/precision_v1/09_audit/*/quality_report.json`; it does not run feature extraction, BA or stereo. An audit completes even when `passed` is false, so read that field and the failures. With `PR_ALLOW_VIEW_PRUNING=1` it proposes a retained subset; without it all views must pass.
+
+Recover into a new scene while preserving `precision_v1` and skipping VGGT/feature matching/BA:
+
+```bash
+set -o pipefail
+PR_ALLOW_VIEW_PRUNING=1 PR_TRAIN=0 \
+  ./run_precision.sh recover precision_v1 precision_v2 \
+  2>&1 | tee outputs/logs/precision_v2_geometry.log
+```
+
+The command copies saved frames and the final SfM model (reflinks where available); it does not copy or overwrite the failed dense stage. Explicit pruning drops cameras with inadequate observations/stereo sources, requires every retained reference to have at least two retained sources, and requires **at least 80% of the original views**. It retains one connected camera-overlap component, removes excluded camera observations from an in-memory model copy, and checks the resulting model again before stereo. The original cameras and files remain untouched. Pose or stereo quality is not guaranteed merely by passing these checks.
+
+Read `precision_v2/04_mvs/quality_report.json` for every exclusion and `retained_quality_report.json` for validation after filtering. A high retained frame fraction does not guarantee coverage of every part of a room: inspect what was excluded before training. Unsupported surfaces are not filled in. If too many views would be lost or the retained model fails QA, recovery stops and retains its reports. Send those JSON reports for diagnosis rather than reducing all thresholds.
+
+After successful geometry inspection:
+
+```bash
+./run_precision.sh report precision_v2
+./run_precision.sh train precision_v2
+```
+
 ## Best first experiment: reuse your existing video inference
 
 Run inside `tmux` on the server. Substitute your actual existing NextGen scene name:

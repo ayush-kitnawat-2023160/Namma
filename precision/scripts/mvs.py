@@ -76,17 +76,47 @@ def ply_vertex_count(path: Path) -> int:
     raise ValueError(f"Missing/unsafe fused PLY header: {path}")
 
 
+def components(graph: np.ndarray, indices=None) -> list[list[int]]:
+    remaining = set(range(len(graph)) if indices is None else indices)
+    result = []
+    while remaining:
+        pending, reached = [min(remaining)], set()
+        while pending:
+            i = pending.pop()
+            if i in reached:
+                continue
+            reached.add(i)
+            pending.extend(int(j) for j in np.flatnonzero(graph[i]) if j in remaining and j not in reached)
+        remaining.difference_update(reached)
+        result.append(sorted(reached))
+    return sorted(result, key=lambda group: (-len(group), group))
+
+
+def supported_core(graph: np.ndarray, eligible: set[int]) -> set[int]:
+    """Each surviving reference needs two sources which also survive."""
+    active = set(eligible)
+    while active:
+        remove = {i for i in active if sum(bool(graph[i, j]) for j in active) < 2}
+        if not remove:
+            break
+        active.difference_update(remove)
+    return active
+
+
 def quality_report(reconstruction, *, neighbors=12, min_points=500,
                    min_observations=50, min_shared_points=30,
                    max_median_error=2.0, max_p95_error=4.0,
-                   min_median_angle=1.5, min_pair_angle=1.0) -> dict:
+                   min_median_angle=1.5, min_pair_angle=1.0,
+                   allow_view_pruning=False, min_retained_fraction=0.8) -> dict:
     """Fail-closed sparse QA. Registration alone is not evidence of geometry.
 
     Uses actual finite triangulated tracks, stored post-BA point reprojection
-    errors, per-camera observations, parallax and connected covisibility.
-    Angular diagnostics use at most 5,000 deterministically sampled tracks.
+    errors, per-camera observations and parallax. Pose connectivity is checked
+    separately from stereo suitability. All reliable tracks vote for pair
+    angles; global strided sampling can leave supported pairs unsampled.
     """
-    images = dict(reconstruction.images.items())
+    images = {key: image for key, image in reconstruction.images.items()
+              if not hasattr(reconstruction, 'is_image_registered') or reconstruction.is_image_registered(key)}
     image_ids = sorted(images)
     index = {image_id: i for i, image_id in enumerate(image_ids)}
     n = len(image_ids)
@@ -99,11 +129,11 @@ def quality_report(reconstruction, *, neighbors=12, min_points=500,
     shared = np.zeros((n, n), dtype=np.int32)
     angle_sums = np.zeros((n, n), dtype=np.float64)
     angle_counts = np.zeros((n, n), dtype=np.int32)
+    parallax_counts = np.zeros((n, n), dtype=np.int32)
     observations = np.zeros(n, dtype=np.int64)
     errors, lengths, max_angles = [], [], []
     rejected = 0
-    sample_stride = max(1, math.ceil(len(reconstruction.points3D) / 5000))
-    for point_index, point in enumerate(reconstruction.points3D.values()):
+    for point in reconstruction.points3D.values():
         xyz = np.asarray(point.xyz, dtype=np.float64)
         error = float(point.error)
         ids = sorted({index[e.image_id] for e in point.track.elements if e.image_id in index})
@@ -122,8 +152,6 @@ def quality_report(reconstruction, *, neighbors=12, min_points=500,
             rows, cols = np.asarray(pairs).T
             shared[rows, cols] += 1
             shared[cols, rows] += 1
-        if point_index % sample_stride:
-            continue
         rays = xyz - centers[ids]
         norms = np.linalg.norm(rays, axis=1)
         if np.any(norms < 1e-10):
@@ -133,6 +161,7 @@ def quality_report(reconstruction, *, neighbors=12, min_points=500,
         max_angles.append(float(angles.max()))
         angle_sums[np.ix_(ids, ids)] += angles
         angle_counts[np.ix_(ids, ids)] += 1
+        parallax_counts[np.ix_(ids, ids)] += angles >= min_pair_angle
 
     median_error = float(np.median(errors)) if errors else None
     p95_error = float(np.percentile(errors, 95)) if errors else None
@@ -151,40 +180,70 @@ def quality_report(reconstruction, *, neighbors=12, min_points=500,
     if median_angle is None or median_angle < min_median_angle:
         problems.append(f"Median maximum triangulation angle {median_angle} is below {min_median_angle} degrees")
     mean_angles = np.divide(angle_sums, angle_counts, out=np.zeros_like(angle_sums), where=angle_counts > 0)
-    graph = (shared >= min_shared_points) & (mean_angles >= min_pair_angle)
+    pose_graph = shared >= min_shared_points
+    np.fill_diagonal(pose_graph, False)
+    graph = pose_graph & (mean_angles >= min_pair_angle) & (parallax_counts >= max(3, min_shared_points // 5))
     np.fill_diagonal(graph, False)
-    seen, pending = set(), [0] if n else []
-    while pending:
-        i = pending.pop()
-        if i in seen:
-            continue
-        seen.add(i)
-        pending.extend(int(j) for j in np.flatnonzero(graph[i]) if int(j) not in seen)
-    if len(seen) != n:
-        problems.append(f"Reliable covisibility graph is disconnected ({len(seen)}/{n} reachable views)")
+    pose_components = components(pose_graph)
+    stereo_components = components(graph)
+    active = set(range(n))
+    exclusion_reasons = {}
+    if allow_view_pruning:
+        eligible = {i for i in active if observations[i] >= min_observations}
+        for i in active - eligible:
+            exclusion_reasons[i] = 'insufficient reliable sparse observations'
+        core = supported_core(graph, eligible)
+        for i in eligible - core:
+            exclusion_reasons[i] = 'fewer than two mutually retained stereo sources with adequate parallax'
+        # Never combine disconnected coordinate islands into a claimed room.
+        groups = components(pose_graph, core)
+        active = set(groups[0]) if groups else set()
+        for i in core - active:
+            exclusion_reasons[i] = 'outside the largest retained pose-overlap component'
+        active = supported_core(graph, active)
+        for i in core - active:
+            exclusion_reasons.setdefault(i, 'lost source support after component selection')
+        fraction = len(active) / max(n, 1)
+        if len(active) < 3 or fraction < min_retained_fraction:
+            problems.append(f'View pruning would retain only {len(active)}/{n} ({fraction:.1%}); need at least {min_retained_fraction:.0%} and three views')
+    selected_pose_components = components(pose_graph, active)
+    if len(selected_pose_components) != 1 or not active:
+        problems.append(f'Reliable pose-overlap graph is disconnected: retained component sizes {[len(group) for group in selected_pose_components]}')
     per_image, source_neighbors = [], {}
     for i, image_id in enumerate(image_ids):
         name = images[image_id].name
-        candidates = [int(j) for j in np.flatnonzero(graph[i])]
+        candidates = [int(j) for j in np.flatnonzero(graph[i]) if j in active]
         candidates.sort(key=lambda j: (-int(shared[i, j]), -float(mean_angles[i, j]), images[image_ids[j]].name))
         selected = candidates[:neighbors]
-        if observations[i] < min_observations:
+        if i in active and observations[i] < min_observations:
             problems.append(f"{name}: {observations[i]} reliable observations; need {min_observations}")
-        if len(selected) < 2:
+        if i in active and len(selected) < 2:
             problems.append(f"{name}: fewer than two covisible views with adequate parallax")
-        source_neighbors[name] = [images[image_ids[j]].name for j in selected]
+        sources = [images[image_ids[j]].name for j in selected]
+        if i in active:
+            source_neighbors[name] = sources
         per_image.append({"name": name, "reliable_observations": int(observations[i]),
-                          "source_images": source_neighbors[name]})
+                          'retained': i in active, 'exclusion_reason': exclusion_reasons.get(i),
+                          'pose_neighbor_count': int(np.count_nonzero(pose_graph[i])),
+                          'stereo_neighbor_count': int(np.count_nonzero(graph[i])),
+                          "source_images": sources})
     return {"passed": not problems, "failures": problems, "registered_images": n,
             "valid_sparse_points": len(errors), "invalid_sparse_points": rejected,
             "median_track_length": median_track, "median_point_error_px": median_error,
             "p95_point_error_px": p95_error, "median_max_triangulation_angle_degrees": median_angle,
-            "parallax_sample_tracks": len(max_angles), "connected_views": len(seen),
+            "parallax_sample_tracks": len(max_angles), 'pair_angle_evidence': 'all reliable tracks',
+            "connected_views": len(pose_components[0]) if pose_components else 0,
+            'pose_component_sizes': [len(group) for group in pose_components],
+            'stereo_component_sizes': [len(group) for group in stereo_components],
+            'retained_images': len(active), 'retained_fraction': len(active) / max(n, 1),
+            'retained_image_ids': [image_ids[i] for i in sorted(active)],
+            'excluded_images': [row for row in per_image if not row['retained']],
             "source_neighbors": source_neighbors, "per_image": per_image,
             "thresholds": {"min_points": min_points, "min_observations": min_observations,
                            "min_shared_points": min_shared_points, "max_median_error_px": max_median_error,
                            "max_p95_error_px": max_p95_error, "min_median_angle_degrees": min_median_angle,
-                           "min_pair_angle_degrees": min_pair_angle, "max_source_neighbors": neighbors}}
+                           "min_pair_angle_degrees": min_pair_angle, "max_source_neighbors": neighbors,
+                           'allow_view_pruning': allow_view_pruning, 'min_retained_fraction': min_retained_fraction}}
 
 
 def run_command(output: Path, name: str, command: list[str]) -> None:
@@ -232,10 +291,13 @@ def main() -> None:
     parser.add_argument("--max-p95-error", type=float, default=4.0)
     parser.add_argument("--min-median-angle", type=float, default=1.5)
     parser.add_argument("--min-pair-angle", type=float, default=1.0)
+    parser.add_argument('--audit-only', action='store_true', help='CPU-only report; never run stereo')
+    parser.add_argument('--allow-view-pruning', action='store_true', help='Explicitly retain a supported subset, recording every exclusion')
+    parser.add_argument('--min-retained-fraction', type=float, default=0.8)
     args = parser.parse_args()
     if not (320 <= args.max_image_size <= 2400 and 2 <= args.neighbors <= 16
             and 0.5 <= args.cache_gb <= 8 and 1 <= args.threads <= 8
-            and 3 <= args.max_images <= 500):
+            and 3 <= args.max_images <= 500 and 0.8 <= args.min_retained_fraction <= 1.0):
         parser.error("Resource settings outside safe bounds (size 320..2400, neighbors 2..16, cache .5..8, threads 1..8, images 3..500)")
     if min(args.min_points, args.min_fused_points, args.min_observations, args.min_shared_points) < 1 or not all(
         math.isfinite(v) and v > 0 for v in (args.max_median_error, args.max_p95_error,
@@ -266,11 +328,36 @@ def main() -> None:
         reconstruction.update_point_3d_errors()
         report = quality_report(reconstruction, **{key: getattr(args, key) for key in (
             "neighbors", "min_points", "min_observations", "min_shared_points", "max_median_error",
-            "max_p95_error", "min_median_angle", "min_pair_angle")})
+            "max_p95_error", "min_median_angle", "min_pair_angle", 'allow_view_pruning', 'min_retained_fraction')})
         write_json(output / "quality_report.json", report)
+        if args.audit_only:
+            status.update(status='audit_complete', quality_passed=report['passed'], retained_images=report['retained_images'])
+            write_json(output / 'summary.json', status)
+            print(json.dumps({key: report[key] for key in ('passed', 'failures', 'registered_images', 'retained_images', 'pose_component_sizes', 'stereo_component_sizes', 'excluded_images')}, indent=2))
+            print(f'Audit saved: {output / "quality_report.json"}', flush=True)
+            return
         if not report["passed"]:
             raise RuntimeError("Sparse quality gates failed: " + "; ".join(report["failures"]))
+        # Work on an in-memory copy. Source files/cameras are never edited.
+        if report['retained_images'] != report['registered_images']:
+            reconstruction = pycolmap.Reconstruction(reconstruction)
+            keep = set(report['retained_image_ids'])
+            for image_id in list(reconstruction.images):
+                if reconstruction.is_image_registered(image_id) and image_id not in keep:
+                    reconstruction.deregister_image(image_id)
+            reconstruction.update_point_3d_errors()
+            verified = quality_report(reconstruction, **{key: getattr(args, key) for key in (
+                'neighbors', 'min_points', 'min_observations', 'min_shared_points', 'max_median_error',
+                'max_p95_error', 'min_median_angle', 'min_pair_angle')})
+            write_json(output / 'retained_quality_report.json', verified)
+            if not verified['passed']:
+                raise RuntimeError('Retained model failed QA after removing weak observations: ' + '; '.join(verified['failures']))
+            report['source_neighbors'] = verified['source_neighbors']
+            write_json(output / 'quality_report.json', report)
+            print(f"Stereo retains {report['retained_images']}/{report['registered_images']} views; exclusions recorded in quality_report.json", flush=True)
         for image in reconstruction.images.values():
+            if not reconstruction.is_image_registered(image.image_id):
+                continue
             relative = Path(image.name)
             if relative.is_absolute() or ".." in relative.parts or any(c in image.name for c in "\n\r,"):
                 raise RuntimeError(f"Image name cannot be represented safely in stereo config: {image.name!r}")

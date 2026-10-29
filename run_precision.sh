@@ -14,6 +14,8 @@ Namma Precision — run reconstruction on the college server only.
   NAMMA_SERVER=1 ./run_precision.sh check
   NAMMA_SERVER=1 ./run_precision.sh pipeline <video> <new-scene>
   NAMMA_SERVER=1 ./run_precision.sh refine <existing-nextgen-scene> <new-scene>
+  NAMMA_SERVER=1 ./run_precision.sh audit <precision-scene>
+  NAMMA_SERVER=1 PR_ALLOW_VIEW_PRUNING=1 PR_TRAIN=0 ./run_precision.sh recover <precision-scene> <new-scene>
   NAMMA_SERVER=1 ./run_precision.sh train <scene>
   NAMMA_SERVER=1 ./run_precision.sh mesh <scene>
   NAMMA_SERVER=1 ./run_precision.sh report <scene>
@@ -34,12 +36,12 @@ fi
 HEAVY=0
 SOURCE_ARGS=()
 case "$CMD" in
-  pipeline|refine)
+  pipeline|refine|recover)
     [[ $# == 3 ]] || fail "Usage: $0 $CMD <video-or-source> <new-scene>"
     SCENE="$3"; HEAVY=1 ;;
-  train|mesh|report)
+  train|mesh|report|audit)
     [[ $# == 2 ]] || fail "Usage: $0 $CMD <scene>"
-    SCENE="$2"; [[ "$CMD" == report ]] || HEAVY=1 ;;
+    SCENE="$2"; [[ "$CMD" == report || "$CMD" == audit ]] || HEAVY=1 ;;
   check) [[ $# == 1 ]] || fail "Usage: $0 check"; SCENE="" ;;
   *) fail "Unknown command '$CMD'; use $0 help." ;;
 esac
@@ -70,14 +72,16 @@ if (( HEAVY )); then
   GPU_ARGS=(--gpus "device=$GPU")
 fi
 
-if [[ "$CMD" == pipeline || "$CMD" == refine ]]; then
+if [[ "$CMD" == pipeline || "$CMD" == refine || "$CMD" == recover ]]; then
   [[ ! -e "$ROOT/outputs/precision/$SCENE" && ! -L "$ROOT/outputs/precision/$SCENE" ]] || fail "Destination exists; choose a new scene: outputs/precision/$SCENE"
 fi
-if [[ "$CMD" == refine ]]; then
+if [[ "$CMD" == refine || "$CMD" == recover ]]; then
   scene_ok "$2" || fail "Invalid source scene name."
-  SOURCE_BASE="$(realpath -e "$ROOT/outputs/nextgen")" || fail "NextGen source directory is missing."
-  SOURCE="$(realpath -e "$ROOT/outputs/nextgen/$2")" || fail "NextGen source scene is missing."
-  [[ -d "$SOURCE" && "$SOURCE" == "$SOURCE_BASE/"* ]] || fail "Source must be a scene inside outputs/nextgen."
+  SOURCE_TREE=nextgen
+  [[ "$CMD" != recover ]] || SOURCE_TREE=precision
+  SOURCE_BASE="$(realpath -e "$ROOT/outputs/$SOURCE_TREE")" || fail "Source directory is missing: outputs/$SOURCE_TREE"
+  SOURCE="$(realpath -e "$ROOT/outputs/$SOURCE_TREE/$2")" || fail "Source scene is missing."
+  [[ -d "$SOURCE" && "$SOURCE" == "$SOURCE_BASE/"* ]] || fail "Source must be a scene inside outputs/$SOURCE_TREE."
   [[ "$SOURCE" != "$(realpath -m "$ROOT/outputs/precision/$SCENE")" ]] || fail "Source and destination must differ."
   SOURCE_ARGS=(-v "$SOURCE:/workspace/source:ro")
 fi

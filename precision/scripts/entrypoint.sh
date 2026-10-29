@@ -8,8 +8,8 @@ fail() { echo "ERROR: $*" >&2; exit 2; }
 case "$CMD" in
   help|-h|--help) echo 'Use ./run_precision.sh help on the host. See precision/README.md.'; exit 0 ;;
   check) exec python "$SCRIPTS/check.py" ;;
-  pipeline|refine) [[ $# == 3 ]] || fail 'Expected input/source and new scene.'; SCENE="$3" ;;
-  train|mesh|report) [[ $# == 2 ]] || fail 'Expected scene.'; SCENE="$2" ;;
+  pipeline|refine|recover) [[ $# == 3 ]] || fail 'Expected input/source and new scene.'; SCENE="$3" ;;
+  train|mesh|report|audit) [[ $# == 2 ]] || fail 'Expected scene.'; SCENE="$2" ;;
   *) fail "Unknown command: $CMD" ;;
 esac
 scene_ok "$SCENE" || fail 'Invalid scene name.'
@@ -31,6 +31,7 @@ export NG_MAX_CANDIDATES="${NG_MAX_CANDIDATES:-1200}"
 [[ "$NG_CALIB_VIEWS" =~ ^[0-9]+$ ]] && (( NG_CALIB_VIEWS >= 3 && NG_CALIB_VIEWS <= 24 )) || fail 'NG_CALIB_VIEWS must be 3..24.'
 [[ "$NG_MAX_CANDIDATES" =~ ^[0-9]+$ ]] && (( NG_MAX_CANDIDATES >= 160 && NG_MAX_CANDIDATES <= 2400 )) || fail 'NG_MAX_CANDIDATES must be 160..2400.'
 [[ "${PR_TRAIN:-1}" =~ ^[01]$ ]] || fail 'PR_TRAIN must be 0 or 1.'
+[[ "${PR_ALLOW_VIEW_PRUNING:-0}" =~ ^[01]$ ]] || fail 'PR_ALLOW_VIEW_PRUNING must be 0 or 1.'
 python - "$NG_GPU_MEMORY_FRACTION" <<'PY'
 import sys
 if not 0.5 <= float(sys.argv[1]) <= 0.88:
@@ -54,9 +55,22 @@ mesh_scene() {
   python "$SCRIPTS/mesh.py" --mvs "$ROOT/04_mvs" --output "$ROOT/08_mesh" \
     --voxel-divisor "${PR_TSDF_VOXEL_DIVISOR:-512}"
 }
+mvs_scene() {
+  local mode=("$@")
+  [[ "${PR_ALLOW_VIEW_PRUNING:-0}" != 1 ]] || mode+=(--allow-view-pruning)
+  python "$SCRIPTS/mvs.py" --source "$ROOT" --output "$MVS_OUT" \
+    --max-image-size "${PR_MVS_MAX_IMAGE_SIZE:-1600}" --neighbors "${PR_MVS_NEIGHBORS:-12}" \
+    --cache-gb 4 --threads 4 --max-images 160 "${mode[@]}"
+}
 if [[ "$CMD" == train ]]; then train_scene; exit; fi
 if [[ "$CMD" == mesh ]]; then mesh_scene; exit; fi
 if [[ "$CMD" == report ]]; then python "$SCRIPTS/report.py" --scene-root "$ROOT"; exit; fi
+if [[ "$CMD" == audit ]]; then
+  [[ -d "$ROOT/03_sfm/model" ]] || fail 'Audit requires completed SfM.'
+  MVS_OUT="$ROOT/09_audit/$(date -u +%Y%m%dT%H%M%SZ)_$$"
+  mvs_scene --audit-only
+  exit
+fi
 
 [[ ! -e "$ROOT" && ! -L "$ROOT" ]] || fail "Refusing to overwrite scene: $SCENE"
 mkdir -p "$ROOT"
@@ -74,7 +88,7 @@ if [[ "$CMD" == pipeline ]]; then
   # Calibration and local-feature inference receive the same allocator guard.
   python "$SCRIPTS/prepare.py" "$2" "$SCENE"
   "$LEGACY/vggt.sh" "$SCENE"
-else
+elif [[ "$CMD" == refine ]]; then
   [[ -d /workspace/source/01_frames/images && -s /workspace/source/02_vggt/cameras.npz ]] || fail 'Source needs prepared frames and VGGT cameras.'
   python - <<'PY'
 from pathlib import Path
@@ -88,14 +102,21 @@ PY
   for stage in 00_calibration 01_frames 02_vggt; do
     [[ ! -d "/workspace/source/$stage" ]] || cp -a --reflink=auto "/workspace/source/$stage" "$ROOT/"
   done
+else
+  [[ -d /workspace/source/01_frames/images && -d /workspace/source/03_sfm/model ]] || fail 'Recovery requires saved frames and completed SfM.'
+  for stage in 00_calibration 01_frames 03_sfm; do
+    [[ ! -d "/workspace/source/$stage" ]] || cp -a --reflink=auto "/workspace/source/$stage" "$ROOT/"
+  done
+  echo 'Reusing saved final cameras and tracks; VGGT and SfM are not rerun.'
 fi
-python "$LEGACY/gpu_guard.py" --stage precision-sfm
-python "$LEGACY/torch_limited_exec.py" --fraction "$NG_GPU_MEMORY_FRACTION" \
-  "$SCRIPTS/sfm_precision.py" --scene-root "$ROOT" --output "$ROOT/03_sfm" \
-  --temporal-window "$NG_TEMPORAL_WINDOW" --visual-neighbors "$NG_VISUAL_NEIGHBORS"
-python "$SCRIPTS/mvs.py" --source "$ROOT" --output "$ROOT/04_mvs" \
-  --max-image-size "${PR_MVS_MAX_IMAGE_SIZE:-1600}" --neighbors "${PR_MVS_NEIGHBORS:-12}" \
-  --cache-gb 4 --threads 4
+if [[ "$CMD" != recover ]]; then
+  python "$LEGACY/gpu_guard.py" --stage precision-sfm
+  python "$LEGACY/torch_limited_exec.py" --fraction "$NG_GPU_MEMORY_FRACTION" \
+    "$SCRIPTS/sfm_precision.py" --scene-root "$ROOT" --output "$ROOT/03_sfm" \
+    --temporal-window "$NG_TEMPORAL_WINDOW" --visual-neighbors "$NG_VISUAL_NEIGHBORS"
+fi
+MVS_OUT="$ROOT/04_mvs"
+mvs_scene
 python "$SCRIPTS/build_dataset.py" --mvs "$ROOT/04_mvs" --output "$ROOT/05_gs_dataset" \
   --max-points "${PR_INITIAL_POINTS:-400000}"
 mesh_scene

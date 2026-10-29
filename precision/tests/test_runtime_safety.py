@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -68,6 +69,14 @@ class WatchdogTests(unittest.TestCase):
             try:
                 self.assertEqual(code, 0)
                 stat = Path(f'/proc/{worker}/stat')
+                deadline = time.monotonic() + 1
+                while stat.exists() and time.monotonic() < deadline:
+                    try:
+                        if stat.read_text().split()[2] == 'Z':
+                            break
+                    except FileNotFoundError:
+                        break
+                    time.sleep(.01)
                 if stat.exists():
                     self.assertEqual(stat.read_text().split()[2], 'Z', 'Worker remains active after job completion')
             finally:
@@ -130,6 +139,27 @@ class LauncherTests(unittest.TestCase):
             self.assertIn(expected, args)
         self.assertEqual(args[-3:], ["pipeline", "a video.mp4", "scene"])
         self.assertIn("/opt/namma-precision/scripts/runtime_watchdog.py", args)
+
+    def test_recovery_reuses_a_read_only_precision_source_and_keeps_guards(self):
+        source = self.root / 'outputs/precision/failed_scene'
+        source.mkdir(parents=True)
+        result = self.run_launcher('recover', 'failed_scene', 'new_scene', PR_ALLOW_VIEW_PRUNING='1', PR_TRAIN='0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = json.loads(self.log.read_text())
+        self.assertIn(f'{source}:/workspace/source:ro', args)
+        self.assertIn('--memory=80g', args)
+        self.assertIn('device=0', args)
+        self.assertIn('PR_ALLOW_VIEW_PRUNING=1', args)
+        self.assertIn('/opt/namma-precision/scripts/runtime_watchdog.py', args)
+        self.assertEqual(args[-3:], ['recover', 'failed_scene', 'new_scene'])
+
+    def test_audit_is_a_cpu_only_container(self):
+        result = self.run_launcher('audit', 'failed_scene')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = json.loads(self.log.read_text())
+        self.assertNotIn('--gpus', args)
+        self.assertNotIn('/opt/namma-precision/scripts/runtime_watchdog.py', args)
+        self.assertEqual(args[-2:], ['audit', 'failed_scene'])
 
     def test_rejects_paths_existing_outputs_and_small_gpu(self):
         for scene in ("../scene", "scene/child", "-scene"):
